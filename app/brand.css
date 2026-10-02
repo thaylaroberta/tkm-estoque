@@ -400,3 +400,8 @@ h1, h2, h3, .metric > strong { font-weight: 700; }
 input[type=number] { -moz-appearance: textfield; }
 input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 @media (max-width: 600px) { .adjust-type { grid-template-columns: 1fr; } .panel-heading .segmented { margin-top: 8px; } }
+.metrics-grid.six { grid-template-columns: repeat(3, 1fr); }
+.metrics-grid.six .metric { padding: 18px; }
+.metrics-grid.six .metric strong { font-size: clamp(18px, 1.7vw, 24px); }
+@media (max-width: 1150px) { .metrics-grid.six { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 850px) { .metrics-grid.six { grid-template-columns: repeat(2, 1fr); } }
