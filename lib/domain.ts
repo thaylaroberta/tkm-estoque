@@ -50,7 +50,8 @@ const FLAVOR_PHRASES:[string,FlavorWord][]=[
  ['blue razz',{emoji:'🫐',pt:'Framboesa azul',g:'f'}],['blue raspberry',{emoji:'🫐',pt:'Framboesa azul',g:'f'}],['dragon fruit',{emoji:'🐉',pt:'Pitaya',g:'f'}],
  ['passion fruit',{emoji:'💛',pt:'Maracujá',g:'m'}],['cotton candy',{emoji:'🍭',pt:'Algodão-doce',g:'m'}],['bubble gum',{emoji:'🍬',pt:'Chiclete',g:'m'}],
  ['energy drink',{emoji:'⚡',pt:'Energético',g:'m'}],['red bull',{emoji:'⚡',pt:'Energético',g:'m'}],['mixed berries',{emoji:'🫐',pt:'Frutas vermelhas',g:'f',plural:true}],
- ['tutti frutti',{emoji:'🍬',pt:'Tutti-frutti',g:'m'}]];
+ ['tutti frutti',{emoji:'🍬',pt:'Tutti-frutti',g:'m'}],['scary berry',{emoji:'🫐',pt:'Frutas vermelhas e silvestres',g:'f',plural:true}],
+ ['summer splash',{emoji:'🌊',pt:'Frutas tropicais e cítricas',g:'f',plural:true}]];
 const FLAVOR_WORDS:Record<string,FlavorWord>={
  grape:{emoji:'🍇',pt:'Uva',g:'f'},grapes:{emoji:'🍇',pt:'Uva',g:'f'},grapefruit:{emoji:'🍊',pt:'Toranja',g:'f'},mango:{emoji:'🥭',pt:'Manga',g:'f'},
  strawberry:{emoji:'🍓',pt:'Morango',g:'m'},strawnana:{emoji:'🍓🍌',pt:'Morango com banana',g:'m'},watermelon:{emoji:'🍉',pt:'Melancia',g:'f'},melon:{emoji:'🍈',pt:'Melão',g:'m'},
@@ -85,8 +86,11 @@ export function suggestFlavor(name:string):{emoji:string;description:string}|nul
  let description=names.length===1?names[0]:names.length===2?`${names[0]} com ${names[1]}`:`${names.slice(0,-1).join(', ')} e ${names.at(-1)}`;
  if(ice){const list=unique.length>2;const anyM=unique.some(f=>f.word.g==='m');description+=` ${list?(anyM?'gelados':'geladas'):adj('gelad',first,false)}`;}
  const emoji=[...new Set(unique.flatMap(f=>Array.from(f.word.emoji.matchAll(/\p{Extended_Pictographic}️?/gu)).map(m=>m[0])))].slice(0,4).join('');
- return {emoji,description};
+ return {emoji:withIce(name,emoji),description};
 }
+/** Regra da lista: sabor com "Ice" no nome sempre leva a pedra de gelo 🧊. */
+export const hasIce=(text:string)=>/(^|[^a-z])ice([^a-z]|$)/i.test(text);
+export const withIce=(name:string,emoji:string)=>hasIce(name)&&!emoji.includes('🧊')?emoji+'🧊':emoji;
 export const LIST_SEPARATOR='━━━━━━━━━━━━━━━━━━';
 export const titleCase=(s:string)=>s.toLowerCase().replace(/(^|[\s\-/(])([\p{L}\d])/gu,(_,a,b)=>a+b.toUpperCase());
 export const listPrice=(p:Product)=>p.list_price??p.price;
@@ -97,7 +101,7 @@ export function whatsappList(d:Data,opts:{onlyInStock?:boolean;showQuantity?:boo
  const blocks=[...d.products].sort((a,b)=>listPrice(a)-listPrice(b)||(a.list_name??a.model).localeCompare(b.list_name??b.model,'pt-BR')).map(p=>{
   const flavors=d.variants.filter(v=>v.product_id===p.id&&(!onlyInStock||v.quantity>0)).sort((a,b)=>flavorLabel(a).localeCompare(flavorLabel(b),'pt-BR'));
   if(!flavors.length)return '';
-  const lines=flavors.map(v=>`${v.list_emoji?v.list_emoji+' ':''}${flavorLabel(v)}${v.list_description?` — ${v.list_description}`:''}${opts.showQuantity?` (${v.quantity} un.)`:''}`);
+  const lines=flavors.map(v=>{const emoji=withIce(flavorLabel(v),v.list_emoji??'');return `${emoji?emoji+' ':''}${flavorLabel(v)}${v.list_description?` — ${v.list_description}`:''}${opts.showQuantity?` (${v.quantity} un.)`:''}`;});
   return `${p.list_emoji?p.list_emoji+' ':''}*${(p.list_name?.trim()||`${p.brand} ${p.model}`).toUpperCase()}*\n\n💰 *${money(listPrice(p))}*\n\n${lines.join('\n')}`;
  }).filter(Boolean);
  const header=(opts.header??d.settings?.list_header??'').trim(),footer=(opts.footer??d.settings?.list_footer??'').trim();

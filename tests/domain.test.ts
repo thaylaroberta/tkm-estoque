@@ -101,14 +101,14 @@ test('lista do WhatsApp: só sabores com estoque, ordem por preço, emojis, desc
  d=applyAction(d,'save_list_settings',{header:'📣 *LISTA ATUALIZADA*😉🔥',footer:'🚨 *ESTOQUE LIMITADO!* 🚨',list_products:[{id:ice.id,list_name:'ELFBAR ICE KING 40K',list_emoji:'❄️🔥',list_price:115},{id:ign.id,list_name:'IGNITE V NANO 1K',list_emoji:'🟠',list_price:40}],
   list_variants:[{id:v['CHERRY FUSE'],list_emoji:'🍒',list_description:'Cereja'},{id:v['PINEAPPLE ICE'],list_emoji:'🍍',list_description:'Abacaxi gelado'}]});
  const S=LIST_SEPARATOR;
- assert.equal(whatsappList(d),`📣 *LISTA ATUALIZADA*😉🔥\n\n${S}\n\n🟠 *IGNITE V NANO 1K*\n\n💰 *R$ 40,00*\n\n🍍 Pineapple Ice — Abacaxi gelado\n\n${S}\n\n❄️🔥 *ELFBAR ICE KING 40K*\n\n💰 *R$ 115,00*\n\n🍒 Cherry Fuse — Cereja\n\n${S}\n\n🚨 *ESTOQUE LIMITADO!* 🚨`);
+ assert.equal(whatsappList(d),`📣 *LISTA ATUALIZADA*😉🔥\n\n${S}\n\n🟠 *IGNITE V NANO 1K*\n\n💰 *R$ 40,00*\n\n🍍🧊 Pineapple Ice — Abacaxi gelado\n\n${S}\n\n❄️🔥 *ELFBAR ICE KING 40K*\n\n💰 *R$ 115,00*\n\n🍒 Cherry Fuse — Cereja\n\n${S}\n\n🚨 *ESTOQUE LIMITADO!* 🚨`);
  assert.ok(whatsappList(d,{onlyInStock:false}).includes('Peach+'));assert.ok(whatsappList(d,{showQuantity:true}).includes('Abacaxi gelado (2 un.)'));
  assert.equal(titleCase('SOUR STRAWBERRY DRAGONFRUIT'),'Sour Strawberry Dragonfruit');
 });
 test('sugestão automática de emoji e descrição para sabores novos',async()=>{
  const {suggestFlavor}=await import('../lib/domain');
- const cases:[string,string,string][]=[['ORANGE SODA ICE','🍊🥤','Refrigerante de laranja gelado'],['SOUR STRAWBERRY DRAGONFRUIT','🍓🐉','Morango azedo com pitaya'],['BLUE RAZZ ICE','🫐','Framboesa azul gelada'],
-  ['TOASTED BANANA','🍌','Banana tostada'],['NANA COCONUT','🍌🥥','Banana com coco'],['STRAWBERRY MANGO ICE','🍓🥭','Morango com manga gelado'],['PEACH MANGO WATERMELON ICE','🍑🥭🍉','Pêssego, manga e melancia gelados'],['GRAPEFRUIT','🍊','Toranja']];
+ const cases:[string,string,string][]=[['ORANGE SODA ICE','🍊🥤🧊','Refrigerante de laranja gelado'],['SCARY BERRY','🫐','Frutas vermelhas e silvestres'],['SUMMER SPLASH','🌊','Frutas tropicais e cítricas'],['SOUR STRAWBERRY DRAGONFRUIT','🍓🐉','Morango azedo com pitaya'],['BLUE RAZZ ICE','🫐🧊','Framboesa azul gelada'],
+  ['TOASTED BANANA','🍌','Banana tostada'],['NANA COCONUT','🍌🥥','Banana com coco'],['STRAWBERRY MANGO ICE','🍓🥭🧊','Morango com manga gelado'],['PEACH MANGO WATERMELON ICE','🍑🥭🍉🧊','Pêssego, manga e melancia gelados'],['GRAPEFRUIT','🍊','Toranja']];
  for(const [n,e,d] of cases)assert.deepEqual(suggestFlavor(n),{emoji:e,description:d},n);
- assert.equal(suggestFlavor('SUMMER SPLASH'),null);
+ assert.equal(suggestFlavor('MAGIC CLOUD'),null);
 });
