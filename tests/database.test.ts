@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
 const UID='11111111-1111-4111-8111-111111111111';
-const ALL=['001_initial.sql','002_snapshot.sql','003_delivery.sql','004_purchase_flow.sql','005_edit_purchase.sql','006_sale_discount.sql','007_edit_sale.sql'];
+const ALL=['001_initial.sql','002_snapshot.sql','003_delivery.sql','004_purchase_flow.sql','005_edit_purchase.sql','006_sale_discount.sql','007_edit_sale.sql','008_adjustment_type.sql'];
 async function migrate(db:PGlite,files:string[]){for(const file of files)await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));}
 async function database(files=ALL){const db=new PGlite();await db.exec(`create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth to authenticated,anon; grant execute on function auth.uid() to authenticated,anon; insert into auth.users values('${UID}');`);
  await migrate(db,files);
@@ -182,4 +182,18 @@ test('007: editar venda (financeiro e troca de itens), trava após compra, exclu
  assert.equal((await db.query<{n:string}>('select ((select count(*) from sales)+(select count(*) from sale_items)+(select count(*) from expenses)+(select count(*) from movements where kind=\'Venda\'))::text n')).rows[0].n,'0');
  assert.equal((await db.query<{n:string}>('select count(*)::text n from sale_revisions')).rows[0].n,'5');
  await db.exec("set request.jwt.claim.sub='22222222-2222-4222-8222-222222222222'");await assert.rejects(rpc(db,'delete_sale',{request_id:rid(),sale_id:sid}),/autorizado/);
+ }finally{await db.close();}});
+
+test('008: ajuste de correção não é perda; ajustes antigos com o motivo do erro viram correção',async()=>{const db=await database(ALL.slice(0,7));try{
+ await db.exec('set role authenticated');
+ await rpc(db,'record_purchase',{request_id:rid(),freight:0,new_products:[{key:'k',brand:'ELFBAR',model:'ICE',price:133.11,minimum:0}],items:[{product_key:'k',variant_name:'PEACH',quantity:2,unit_cost:70}]});
+ const vid=(await db.query<{id:string}>('select id from variants')).rows[0].id;
+ await rpc(db,'adjust_stock',{request_id:rid(),variant_id:vid,quantity:-1,reason:'Erro lançamento compra'});
+ await rpc(db,'adjust_stock',{request_id:rid(),variant_id:vid,quantity:-1,reason:'Avaria'});
+ await db.exec('reset role');await migrate(db,['008_adjustment_type.sql']);await db.exec('set role authenticated');
+ const types=(await db.query<{reason:string;t:string}>("select reason,adjustment_type t from movements where kind='Ajuste' order by reason")).rows.map(r=>[r.reason,r.t]);
+ assert.deepEqual(types,[['Avaria','perda'],['Erro lançamento compra','correcao']]);
+ await rpc(db,'adjust_stock',{request_id:rid(),variant_id:vid,quantity:1,unit_cost:70,reason:'Contagem',adjustment_type:'correcao'});
+ assert.equal((await db.query<{t:string}>("select adjustment_type t from movements where reason='Contagem'")).rows[0].t,'correcao');
+ await assert.rejects(rpc(db,'adjust_stock',{request_id:rid(),variant_id:vid,quantity:1,unit_cost:1,reason:'xxx',adjustment_type:'outro'}),/inválido/);
  }finally{await db.close();}});

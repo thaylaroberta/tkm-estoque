@@ -19,7 +19,7 @@ test('venda inválida não altera dados; idempotência evita duplicação',()=>{
  const p={request_id:crypto.randomUUID(),payment:'Pix',items:[{variant_id:v.id,quantity:1,unit_price:20}]};const next=applyAction(d,'record_sale',p);assert.deepEqual(applyAction(next,'record_sale',p),next);
 });
 test('indicadores separam taxa, período e estoque atual; perdas reduzem resultado',()=>{
- let d=demoData();let r=report(d,'','');assert.equal(r.revenue,314);assert.equal(r.stock,31);assert.equal(r.capital,356.4);assert.ok(Math.abs(r.cogs-171.6)<.000001);assert.ok(Math.abs(r.net-117.4)<.00001);
+ let d=demoData();let r=report(d,'','');assert.equal(r.revenue,304);assert.equal(r.stock,31);assert.equal(r.capital,356.4);assert.ok(Math.abs(r.cogs-171.6)<.000001);assert.ok(Math.abs(r.net-117.4)<.00001);
  const empty=report(d,'2000-01-01','2000-01-31');assert.equal(empty.revenue,0);assert.equal(empty.stock,31);
  d=applyAction(d,'adjust_stock',{variant_id:d.variants[0].id,quantity:-1,reason:'Avaria'});r=report(d,'','');assert.equal(r.loss,19.8);assert.ok(Math.abs(r.net-97.6)<.00001);
 });
@@ -27,7 +27,7 @@ test('entrega cobrada 10: custo 7 gera +3; custo 15 gera -5 sem dupla despesa',(
  let d=applyAction(emptyData(),'save_product',{brand:'Papel',model:'Agenda',category:'Papelaria',price:20,minimum:0,variants:['Azul']});const vid=d.variants[0].id;
  d=applyAction(d,'record_batch',{freight:0,items:[{variant_id:vid,quantity:2,unit_cost:5}]});
  d=applyAction(d,'record_sale',{request_id:'delivery-1',payment:'Pix',delivery_charged:10,delivery_cost:7,items:[{variant_id:vid,quantity:1,unit_price:20}]});
- let r=report(d,'','');assert.equal(r.deliveryProfit,3);assert.equal(r.revenue,30);assert.equal(r.expense,7);assert.equal(r.net,18);
+ let r=report(d,'','');assert.equal(r.deliveryProfit,3);assert.equal(r.revenue,20);assert.equal(r.expense,7);assert.equal(r.net,18);
  const p={request_id:'delivery-2',payment:'Pix',delivery_charged:10,delivery_cost:15,items:[{variant_id:vid,quantity:1,unit_price:20}]};d=applyAction(d,'record_sale',p);d=applyAction(d,'record_sale',p);
  r=report(d,'','');assert.equal(d.expenses.length,2);assert.equal(r.deliveryProfit,-2);assert.equal(r.expense,22);assert.equal(r.net,28);assert.equal(r.rows[0].revenue,40);assert.ok(d.expenses.every(e=>e.source==='venda'&&e.sale_id));
 });
@@ -80,4 +80,15 @@ test('demo: editar venda (financeiro mantém CMV; troca de itens estorna), trava
  assert.throws(()=>applyAction(d,'update_sale',{sale_id:sid,payment:'Pix',items:[{variant_id:m.id,quantity:1,unit_price:100}]}),/compra ou ajuste/);
  d=applyAction(d,'delete_sale',{sale_id:sid});
  assert.deepEqual([d.variants[1].quantity,d.variants[1].value,d.sales.length,d.sale_items.length],[6,390,0,0]);
+});
+test('faturamento só de produtos; entrega é repasse; correção de lançamento não é perda; rankings por marca e sabor',()=>{
+ let d=applyAction(emptyData(),'record_purchase',{freight:0,new_products:[{key:'a',brand:'ELFBAR',model:'ICE',price:133.11,minimum:0},{key:'b',brand:'WAKA',model:'FASTA',price:100,minimum:0}],items:[{product_key:'a',variant_name:'GRAPE',quantity:3,unit_cost:70},{product_key:'a',variant_name:'PEACH',quantity:1,unit_cost:70},{product_key:'b',variant_name:'MELON',quantity:3,unit_cost:50}]});
+ const [g,pe,m]=d.variants;
+ d=applyAction(d,'record_sale',{payment:'Pix',delivery_charged:10,delivery_cost:15,items:[{variant_id:g.id,quantity:2,unit_price:100},{variant_id:m.id,quantity:1,unit_price:80}]});
+ d=applyAction(d,'adjust_stock',{variant_id:pe.id,quantity:-1,reason:'Erro lançamento compra',adjustment_type:'correcao'});
+ const r=report(d,'','');
+ assert.equal(r.revenue,280);assert.equal(r.gross,280-190);assert.equal(r.operatingExpense,0);assert.equal(r.loss,0);assert.equal(r.net,90-5);
+ assert.deepEqual(r.brands.map(b=>[b.name,b.units,b.revenue]),[['ELFBAR',2,200],['WAKA',1,80]]);
+ assert.deepEqual(r.flavors.map(f=>[f.detail,f.name,f.units]),[['ICE','GRAPE',2],['FASTA','MELON',1]]);
+ d=applyAction(d,'adjust_stock',{variant_id:g.id,quantity:-1,reason:'Avaria'});assert.equal(report(d,'','').loss,70);
 });

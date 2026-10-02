@@ -5,11 +5,11 @@ export type BatchItem = {id:string;batch_id:string;variant_id:string;quantity:nu
 export type Sale = {id:string;number:number;payment:string;revenue:number;cogs:number;card_fee:number;discount?:number;delivery_charged:number;delivery_cost:number;note:string;updated_at?:string|null;created_at:string;request_id:string};
 export type SaleItem = {id:string;sale_id:string;variant_id:string;quantity:number;unit_price:number;list_price?:number|null;discount?:number;cogs:number};
 export type Expense = {id:string;category:string;description:string;amount:number;date:string;source:string;sale_id?:string;request_id:string};
-export type Movement = {id:string;variant_id:string;kind:'Entrada'|'Venda'|'Ajuste';quantity:number;value:number;reference_id:string;reason:string;created_at:string};
+export type Movement = {id:string;variant_id:string;kind:'Entrada'|'Venda'|'Ajuste';quantity:number;value:number;reference_id:string;reason:string;adjustment_type?:'perda'|'correcao'|null;created_at:string};
 export type Data = {batch_revisions?:string[];products:Product[];variants:Variant[];batches:Batch[];batch_items:BatchItem[];sales:Sale[];sale_items:SaleItem[];expenses:Expense[];movements:Movement[]};
 export type Line = {variant_id?:string;quantity:number;unit_cost?:number;unit_price?:number;product_id?:string;product_key?:string;variant_name?:string};
 export type NewProduct = {key:string;brand:string;model:string;category?:string;price:number;minimum?:number};
-export type Payload = {id?:string;request_id?:string;brand?:string;model?:string;category?:string;price?:number;minimum?:number;variants?:string[];items?:Line[];name?:string;freight?:number;payment?:string;card_fee?:number;delivery_charged?:number;delivery_cost?:number;note?:string;description?:string;amount?:number;date?:string;variant_id?:string;quantity?:number;reason?:string;unit_cost?:number;purchase_date?:string;other_costs?:number;new_products?:NewProduct[];price_updates?:{product_id:string;price:number}[];batch_id?:string;sale_id?:string;discount?:number};
+export type Payload = {id?:string;request_id?:string;brand?:string;model?:string;category?:string;price?:number;minimum?:number;variants?:string[];items?:Line[];name?:string;freight?:number;payment?:string;card_fee?:number;delivery_charged?:number;delivery_cost?:number;note?:string;description?:string;amount?:number;date?:string;variant_id?:string;quantity?:number;reason?:string;unit_cost?:number;adjustment_type?:'perda'|'correcao';purchase_date?:string;other_costs?:number;new_products?:NewProduct[];price_updates?:{product_id:string;price:number}[];batch_id?:string;sale_id?:string;discount?:number};
 export type Action = 'save_product'|'record_batch'|'record_purchase'|'update_purchase'|'rename_purchase'|'delete_purchase'|'update_sale'|'delete_sale'|'record_sale'|'record_expense'|'adjust_stock';
 export const emptyData = ():Data => ({products:[],variants:[],batches:[],batch_items:[],sales:[],sale_items:[],expenses:[],movements:[]});
 export const brl = (value:number) => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(value);
@@ -147,7 +147,7 @@ export function applyAction(original:Data,action:Action,p:Payload,now=new Date()
   if(!['Anúncios','Entrega','Embalagem','Ferramentas/sistemas','Outros'].includes(p.category??'')||!p.description?.trim()||!p.date)throw Error('Preencha os dados da despesa.');
   d.expenses.push({id:id(),category:p.category!,description:p.description.trim(),amount:round(positive(p.amount)),date:p.date,source:'manual',request_id:rid});
  } else {
-  const v=variant(p.variant_id),q=p.quantity!;if(!Number.isInteger(q)||q===0||!p.reason||p.reason.trim().length<3)throw Error('Informe quantidade e motivo do ajuste.');if(v.quantity+q<0)throw Error('O ajuste excede o estoque.');const delta=q>0?round(positive(p.unit_cost,true))*q:(v.quantity===-q?-v.value:round(v.value*q/v.quantity,6));v.quantity+=q;v.value=round(v.value+delta,6);move(v,'Ajuste',q,delta,rid,p.reason.trim());
+  const v=variant(p.variant_id),q=p.quantity!;if(!Number.isInteger(q)||q===0||!p.reason||p.reason.trim().length<3)throw Error('Informe quantidade e motivo do ajuste.');if(v.quantity+q<0)throw Error('O ajuste excede o estoque.');const delta=q>0?round(positive(p.unit_cost,true))*q:(v.quantity===-q?-v.value:round(v.value*q/v.quantity,6));v.quantity+=q;v.value=round(v.value+delta,6);move(v,'Ajuste',q,delta,rid,p.reason.trim());d.movements[d.movements.length-1].adjustment_type=p.adjustment_type??'perda';
  }
  return d;
 }
@@ -167,8 +167,8 @@ export function label(d:Data,vid:string) {const v=d.variants.find(v=>v.id===vid)
 export function report(d:Data,from:string,to:string) {
  const within=(date:string)=>{const key=date.length===10?date:day(date);return (!from||key>=from)&&(!to||key<=to);};
  const sales=d.sales.filter(s=>within(s.created_at)),ids=new Set(sales.map(s=>s.id)),items=d.sale_items.filter(i=>ids.has(i.sale_id));
- const expenses=d.expenses.filter(e=>within(e.date));const productRevenue=sales.reduce((a,s)=>a+s.revenue,0),deliveryRevenue=sales.reduce((a,s)=>a+(s.delivery_charged??0),0),deliveryCost=sales.reduce((a,s)=>a+(s.delivery_cost??0),0),revenue=productRevenue+deliveryRevenue,cogs=sales.reduce((a,s)=>a+s.cogs,0),expense=expenses.reduce((a,e)=>a+e.amount,0);
- const loss=-d.movements.filter(m=>m.kind==='Ajuste'&&m.value<0&&within(m.created_at)).reduce((a,m)=>a+m.value,0);
+ const expenses=d.expenses.filter(e=>within(e.date));const productRevenue=sales.reduce((a,s)=>a+s.revenue,0),deliveryRevenue=sales.reduce((a,s)=>a+(s.delivery_charged??0),0),deliveryCost=sales.reduce((a,s)=>a+(s.delivery_cost??0),0),revenue=productRevenue,cogs=sales.reduce((a,s)=>a+s.cogs,0),expense=expenses.reduce((a,e)=>a+e.amount,0);
+ const loss=Math.max(0,-d.movements.filter(m=>m.kind==='Ajuste'&&m.adjustment_type!=='correcao'&&m.value<0&&within(m.created_at)).reduce((a,m)=>a+m.value,0));
  const stock=d.variants.reduce((a,v)=>a+v.quantity,0),capital=d.variants.reduce((a,v)=>a+v.value,0),potential=d.variants.reduce((a,v)=>a+v.quantity*(d.products.find(p=>p.id===v.product_id)?.price??0),0);
  const rows=d.products.map(p=>{
   const variants=d.variants.filter(v=>v.product_id===p.id),vids=new Set(variants.map(v=>v.id)),pi=items.filter(i=>vids.has(i.variant_id));const units=pi.reduce((a,i)=>a+i.quantity,0),rev=pi.reduce((a,i)=>a+itemRevenue(i),0),cost=pi.reduce((a,i)=>a+i.cogs,0);
@@ -180,7 +180,14 @@ export function report(d:Data,from:string,to:string) {
   return {...p,units,revenue:rev,profit:rev-cost,margin:rev?(rev-cost)/rev*100:0,stock:variants.reduce((a,v)=>a+v.quantity,0),best:best?.units?best.name:'—',last,days:last?Math.floor((Date.parse(day()+'T12:00:00Z')-Date.parse(day(last)+'T12:00:00Z'))/86400000):null,turnover:average>0?units/average:null};
  });
  const discounts=items.reduce((a,i)=>a+itemDiscount(i),0);
- return {within,sales,items,expenses,revenue,productRevenue,discounts,grossProducts:productRevenue+discounts,deliveryRevenue,deliveryCost,deliveryProfit:deliveryRevenue-deliveryCost,cogs,expense,loss,stock,capital,potential,gross:revenue-cogs,net:revenue-cogs-expense-loss,units:items.reduce((a,i)=>a+i.quantity,0),rows,low:d.variants.filter(v=>v.quantity<=(d.products.find(p=>p.id===v.product_id)?.minimum??0))};
+ // Rankings do período: por marca e por sabor (receita líquida dos itens).
+ const group=(keyOf:(i:SaleItem)=>{key:string;name:string;detail:string})=>{const map=new Map<string,{key:string;name:string;detail:string;units:number;revenue:number}>();
+  for(const i of items){const k=keyOf(i);const row=map.get(k.key)??{...k,units:0,revenue:0};row.units+=i.quantity;row.revenue+=itemRevenue(i);map.set(k.key,row);}
+  return [...map.values()].sort((a,b)=>b.units-a.units||b.revenue-a.revenue);};
+ const productOfItem=(i:SaleItem)=>{const v=d.variants.find(x=>x.id===i.variant_id);return {v,p:d.products.find(x=>x.id===v?.product_id)};};
+ const brands=group(i=>{const {p}=productOfItem(i);const b=(p?.brand??'Sem marca').trim();return {key:b.toLowerCase(),name:b,detail:''};});
+ const flavors=group(i=>{const {v,p}=productOfItem(i);return {key:i.variant_id,name:v?.name??'Sabor',detail:p?.model??''};});
+ return {within,sales,items,expenses,revenue,productRevenue,discounts,grossProducts:productRevenue+discounts,deliveryRevenue,deliveryCost,deliveryProfit:deliveryRevenue-deliveryCost,cogs,expense,loss,stock,capital,potential,gross:revenue-cogs,operatingExpense:expense-deliveryCost,net:revenue-cogs-(expense-deliveryCost)+(deliveryRevenue-deliveryCost)-loss,brands,flavors,units:items.reduce((a,i)=>a+i.quantity,0),rows,low:d.variants.filter(v=>v.quantity<=(d.products.find(p=>p.id===v.product_id)?.minimum??0))};
 }
 export function exportCSV(rows:Record<string,unknown>[],filename:string) {
  if(!rows.length)return;const keys=Object.keys(rows[0]);const cell=(v:unknown)=>{let s=String(v??'');if(/^[=+\-@\t\r]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';};
