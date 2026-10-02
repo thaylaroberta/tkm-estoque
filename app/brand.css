@@ -405,3 +405,40 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
 .metrics-grid.six .metric strong { font-size: clamp(18px, 1.7vw, 24px); }
 @media (max-width: 1150px) { .metrics-grid.six { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 850px) { .metrics-grid.six { grid-template-columns: repeat(2, 1fr); } }
+
+/* ── Lista para o grupo (WhatsApp) ────────────────────────────────────── */
+.list-modal { width: 1100px; }
+.list-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 22px; align-items: start; }
+.list-preview { position: sticky; top: 0; }
+.list-options { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px; }
+.wa-bubble { background: #e7ffdb; border-radius: 4px 14px 14px 14px; padding: 12px 14px; max-height: 56vh; overflow-y: auto; box-shadow: 0 1px 2px #0002; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 13.5px; line-height: 1.35; color: #111b21; }
+.wa-bubble p { margin: 0; white-space: pre-wrap; word-break: break-word; }
+.list-actions { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.list-actions .button { display: inline-flex; align-items: center; gap: 7px; text-decoration: none; }
+.list-editor h3 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.list-editor textarea { font-size: 12px; font-family: inherit; }
+.list-product { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 10px; background: #fff; }
+.list-product summary { cursor: pointer; padding: 11px 13px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+.list-product summary small { color: var(--muted); }
+.list-product-fields { display: grid; grid-template-columns: 90px 1fr 150px; gap: 10px; padding: 0 13px; }
+.list-product-fields label { margin: 0 0 10px; font-size: 11px; }
+.list-product-fields small { font-weight: 400; color: var(--muted); font-size: 10px; }
+.list-flavors { display: grid; gap: 6px; padding: 0 13px 13px; }
+.list-flavor { display: grid; grid-template-columns: 58px minmax(0, 1fr) minmax(0, 1.3fr) 62px; gap: 6px; align-items: center; }
+.list-flavor input { font-size: 12px; padding: 7px 8px; }
+.list-flavor .emoji-input { text-align: center; }
+.list-flavor small { font-size: 10px; color: var(--muted); text-align: right; }
+.list-flavor.out { opacity: .5; }
+@media (max-width: 900px) {
+  .list-layout { grid-template-columns: 1fr; }
+  .list-preview { position: static; }
+  .wa-bubble { max-height: 45vh; }
+}
+@media (max-width: 600px) {
+  .list-product-fields { grid-template-columns: 70px 1fr; }
+  .list-product-fields label:last-child { grid-column: 1 / -1; }
+  .list-flavor { grid-template-columns: 48px 1fr; }
+  .list-flavor input:nth-of-type(3) { grid-column: 1 / -1; }
+  .list-flavor small { grid-column: 1 / -1; text-align: left; }
+  .list-actions .button { flex: 1; justify-content: center; }
+}

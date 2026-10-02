@@ -92,3 +92,16 @@ test('faturamento só de produtos; entrega é repasse; correção de lançamento
  assert.deepEqual(r.flavors.map(f=>[f.detail,f.name,f.units]),[['ICE','GRAPE',2],['FASTA','MELON',1]]);
  d=applyAction(d,'adjust_stock',{variant_id:g.id,quantity:-1,reason:'Avaria'});assert.equal(report(d,'','').loss,70);
 });
+test('lista do WhatsApp: só sabores com estoque, ordem por preço, emojis, descrições e textos fixos',async()=>{
+ const {whatsappList,titleCase,LIST_SEPARATOR}=await import('../lib/domain');
+ let d=applyAction(emptyData(),'record_purchase',{freight:0,new_products:[{key:'a',brand:'ELFBAR',model:'ICE KING 40K',price:133.11,minimum:0},{key:'b',brand:'IGNITE',model:'VNANO',price:41,minimum:0}],
+  items:[{product_key:'a',variant_name:'CHERRY FUSE',quantity:1,unit_cost:65},{product_key:'a',variant_name:'PEACH+',quantity:1,unit_cost:65},{product_key:'b',variant_name:'PINEAPPLE ICE',quantity:2,unit_cost:20}]});
+ const ice=d.products.find(p=>p.model==='ICE KING 40K')!,ign=d.products.find(p=>p.model==='VNANO')!;const v=Object.fromEntries(d.variants.map(x=>[x.name,x.id]));
+ d=applyAction(d,'record_sale',{payment:'Pix',items:[{variant_id:v['PEACH+'],quantity:1,unit_price:115}]});
+ d=applyAction(d,'save_list_settings',{header:'📣 *LISTA ATUALIZADA*😉🔥',footer:'🚨 *ESTOQUE LIMITADO!* 🚨',list_products:[{id:ice.id,list_name:'ELFBAR ICE KING 40K',list_emoji:'❄️🔥',list_price:115},{id:ign.id,list_name:'IGNITE V NANO 1K',list_emoji:'🟠',list_price:40}],
+  list_variants:[{id:v['CHERRY FUSE'],list_emoji:'🍒',list_description:'Cereja'},{id:v['PINEAPPLE ICE'],list_emoji:'🍍',list_description:'Abacaxi gelado'}]});
+ const S=LIST_SEPARATOR;
+ assert.equal(whatsappList(d),`📣 *LISTA ATUALIZADA*😉🔥\n\n${S}\n\n🟠 *IGNITE V NANO 1K*\n\n💰 *R$ 40,00*\n\n🍍 Pineapple Ice — Abacaxi gelado\n\n${S}\n\n❄️🔥 *ELFBAR ICE KING 40K*\n\n💰 *R$ 115,00*\n\n🍒 Cherry Fuse — Cereja\n\n${S}\n\n🚨 *ESTOQUE LIMITADO!* 🚨`);
+ assert.ok(whatsappList(d,{onlyInStock:false}).includes('Peach+'));assert.ok(whatsappList(d,{showQuantity:true}).includes('Abacaxi gelado (2 un.)'));
+ assert.equal(titleCase('SOUR STRAWBERRY DRAGONFRUIT'),'Sour Strawberry Dragonfruit');
+});

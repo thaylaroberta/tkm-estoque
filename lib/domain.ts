@@ -1,16 +1,17 @@
-export type Product = {id:string;brand:string;model:string;category:string;price:number;minimum:number};
-export type Variant = {id:string;product_id:string;name:string;quantity:number;value:number};
+export type Product = {id:string;brand:string;model:string;category:string;price:number;minimum:number;list_name?:string|null;list_emoji?:string|null;list_price?:number|null};
+export type Variant = {id:string;product_id:string;name:string;quantity:number;value:number;list_emoji?:string|null;list_label?:string|null;list_description?:string|null};
 export type Batch = {id:string;number:number;name:string;freight:number;other_costs?:number;merchandise:number;purchase_date?:string;updated_at?:string|null;created_at:string;request_id:string};
 export type BatchItem = {id:string;batch_id:string;variant_id:string;quantity:number;unit_cost:number;freight:number;other_costs?:number;effective_unit_cost?:number|null;avg_cost_after?:number|null;suggested_price?:number|null;sale_price?:number|null};
 export type Sale = {id:string;number:number;payment:string;revenue:number;cogs:number;card_fee:number;discount?:number;delivery_charged:number;delivery_cost:number;note:string;updated_at?:string|null;created_at:string;request_id:string};
 export type SaleItem = {id:string;sale_id:string;variant_id:string;quantity:number;unit_price:number;list_price?:number|null;discount?:number;cogs:number};
 export type Expense = {id:string;category:string;description:string;amount:number;date:string;source:string;sale_id?:string;request_id:string};
 export type Movement = {id:string;variant_id:string;kind:'Entrada'|'Venda'|'Ajuste';quantity:number;value:number;reference_id:string;reason:string;adjustment_type?:'perda'|'correcao'|null;created_at:string};
-export type Data = {batch_revisions?:string[];products:Product[];variants:Variant[];batches:Batch[];batch_items:BatchItem[];sales:Sale[];sale_items:SaleItem[];expenses:Expense[];movements:Movement[]};
+export type Settings = {list_header:string;list_footer:string};
+export type Data = {settings?:Settings|null;batch_revisions?:string[];products:Product[];variants:Variant[];batches:Batch[];batch_items:BatchItem[];sales:Sale[];sale_items:SaleItem[];expenses:Expense[];movements:Movement[]};
 export type Line = {variant_id?:string;quantity:number;unit_cost?:number;unit_price?:number;product_id?:string;product_key?:string;variant_name?:string};
 export type NewProduct = {key:string;brand:string;model:string;category?:string;price:number;minimum?:number};
-export type Payload = {id?:string;request_id?:string;brand?:string;model?:string;category?:string;price?:number;minimum?:number;variants?:string[];items?:Line[];name?:string;freight?:number;payment?:string;card_fee?:number;delivery_charged?:number;delivery_cost?:number;note?:string;description?:string;amount?:number;date?:string;variant_id?:string;quantity?:number;reason?:string;unit_cost?:number;adjustment_type?:'perda'|'correcao';purchase_date?:string;other_costs?:number;new_products?:NewProduct[];price_updates?:{product_id:string;price:number}[];batch_id?:string;sale_id?:string;discount?:number};
-export type Action = 'save_product'|'record_batch'|'record_purchase'|'update_purchase'|'rename_purchase'|'delete_purchase'|'update_sale'|'delete_sale'|'record_sale'|'record_expense'|'adjust_stock';
+export type Payload = {id?:string;request_id?:string;brand?:string;model?:string;category?:string;price?:number;minimum?:number;variants?:string[];items?:Line[];name?:string;freight?:number;payment?:string;card_fee?:number;delivery_charged?:number;delivery_cost?:number;note?:string;description?:string;amount?:number;date?:string;variant_id?:string;quantity?:number;reason?:string;unit_cost?:number;adjustment_type?:'perda'|'correcao';purchase_date?:string;other_costs?:number;new_products?:NewProduct[];price_updates?:{product_id:string;price:number}[];batch_id?:string;sale_id?:string;discount?:number;header?:string;footer?:string;list_products?:{id:string;list_name?:string;list_emoji?:string;list_price?:number|null}[];list_variants?:{id:string;list_emoji?:string;list_label?:string;list_description?:string}[]};
+export type Action = 'save_product'|'record_batch'|'record_purchase'|'update_purchase'|'rename_purchase'|'delete_purchase'|'update_sale'|'delete_sale'|'save_list_settings'|'record_sale'|'record_expense'|'adjust_stock';
 export const emptyData = ():Data => ({products:[],variants:[],batches:[],batch_items:[],sales:[],sale_items:[],expenses:[],movements:[]});
 export const brl = (value:number) => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(value);
 export const num = (value:number) => new Intl.NumberFormat('pt-BR',{maximumFractionDigits:2}).format(value);
@@ -42,6 +43,22 @@ export const itemRevenue = (i:{quantity:number;unit_price:number;discount?:numbe
 export function saleBlockers(d:Data,saleId:string,vids:string[]):string[] {
  const sale=d.sales.find(x=>x.id===saleId);if(!sale)return [];const set=new Set(vids);
  return [...new Set(d.movements.filter(m=>set.has(m.variant_id)&&(m.kind==='Entrada'||m.kind==='Ajuste')&&m.created_at>sale.created_at).map(m=>{const v=d.variants.find(x=>x.id===m.variant_id),p=d.products.find(x=>x.id===v?.product_id);return `${p?.model??''} · ${v?.name??''} (${m.kind.toLowerCase()})`;}))];
+}
+export const LIST_SEPARATOR='━━━━━━━━━━━━━━━━━━';
+export const titleCase=(s:string)=>s.toLowerCase().replace(/(^|[\s\-/(])([\p{L}\d])/gu,(_,a,b)=>a+b.toUpperCase());
+export const listPrice=(p:Product)=>p.list_price??p.price;
+export const flavorLabel=(v:Variant)=>v.list_label?.trim()||titleCase(v.name.trim());
+/** Lista de estoque no formato do grupo de WhatsApp (negrito com *texto*). */
+export function whatsappList(d:Data,opts:{onlyInStock?:boolean;showQuantity?:boolean;header?:string;footer?:string}={}):string {
+ const onlyInStock=opts.onlyInStock??true;const money=(n:number)=>brl(n).replace(/\u00a0/g,' ');
+ const blocks=[...d.products].sort((a,b)=>listPrice(a)-listPrice(b)||(a.list_name??a.model).localeCompare(b.list_name??b.model,'pt-BR')).map(p=>{
+  const flavors=d.variants.filter(v=>v.product_id===p.id&&(!onlyInStock||v.quantity>0)).sort((a,b)=>flavorLabel(a).localeCompare(flavorLabel(b),'pt-BR'));
+  if(!flavors.length)return '';
+  const lines=flavors.map(v=>`${v.list_emoji?v.list_emoji+' ':''}${flavorLabel(v)}${v.list_description?` — ${v.list_description}`:''}${opts.showQuantity?` (${v.quantity} un.)`:''}`);
+  return `${p.list_emoji?p.list_emoji+' ':''}*${(p.list_name?.trim()||`${p.brand} ${p.model}`).toUpperCase()}*\n\n💰 *${money(listPrice(p))}*\n\n${lines.join('\n')}`;
+ }).filter(Boolean);
+ const header=(opts.header??d.settings?.list_header??'').trim(),footer=(opts.footer??d.settings?.list_footer??'').trim();
+ return [header,...blocks,footer].filter(Boolean).join(`\n\n${LIST_SEPARATOR}\n\n`).trim();
 }
 export const round = (n:number, digits=2) => Math.round((n+Number.EPSILON)*10**digits)/10**digits;
 const id = () => crypto.randomUUID();
@@ -143,6 +160,10 @@ export function applyAction(original:Data,action:Action,p:Payload,now=new Date()
    d.movements.push({id:id(),variant_id:v.id,kind:'Venda',quantity:-q,value:-cost,reference_id:sale.id,reason:'Venda registrada',created_at:sale.created_at});});
   Object.assign(sale,fields,{revenue:round(gross-disc),cogs:round(cogs,6)});if(existing)sale.updated_at=now;else d.sales.push(sale);
   syncExpense(sale);
+ } else if(action==='save_list_settings') {
+  d.settings={list_header:p.header??'',list_footer:p.footer??''};
+  for(const x of p.list_products??[]){const product=d.products.find(y=>y.id===x.id);if(!product)continue;if((x.list_price??0)<0)throw Error('Preço da lista inválido.');product.list_name=x.list_name?.trim()||null;product.list_emoji=x.list_emoji?.trim()||null;product.list_price=x.list_price==null?null:round(x.list_price);}
+  for(const x of p.list_variants??[]){const v=d.variants.find(y=>y.id===x.id);if(!v)continue;v.list_emoji=x.list_emoji?.trim()||null;v.list_label=x.list_label?.trim()||null;v.list_description=x.list_description?.trim()||null;}
  } else if(action==='record_expense') {
   if(!['Anúncios','Entrega','Embalagem','Ferramentas/sistemas','Outros'].includes(p.category??'')||!p.description?.trim()||!p.date)throw Error('Preencha os dados da despesa.');
   d.expenses.push({id:id(),category:p.category!,description:p.description.trim(),amount:round(positive(p.amount)),date:p.date,source:'manual',request_id:rid});

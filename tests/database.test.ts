@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
 const UID='11111111-1111-4111-8111-111111111111';
-const ALL=['001_initial.sql','002_snapshot.sql','003_delivery.sql','004_purchase_flow.sql','005_edit_purchase.sql','006_sale_discount.sql','007_edit_sale.sql','008_adjustment_type.sql'];
+const ALL=['001_initial.sql','002_snapshot.sql','003_delivery.sql','004_purchase_flow.sql','005_edit_purchase.sql','006_sale_discount.sql','007_edit_sale.sql','008_adjustment_type.sql','009_whatsapp_list.sql'];
 async function migrate(db:PGlite,files:string[]){for(const file of files)await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));}
 async function database(files=ALL){const db=new PGlite();await db.exec(`create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth to authenticated,anon; grant execute on function auth.uid() to authenticated,anon; insert into auth.users values('${UID}');`);
  await migrate(db,files);
@@ -196,4 +196,20 @@ test('008: ajuste de correção não é perda; ajustes antigos com o motivo do e
  await rpc(db,'adjust_stock',{request_id:rid(),variant_id:vid,quantity:1,unit_cost:70,reason:'Contagem',adjustment_type:'correcao'});
  assert.equal((await db.query<{t:string}>("select adjustment_type t from movements where reason='Contagem'")).rows[0].t,'correcao');
  await assert.rejects(rpc(db,'adjust_stock',{request_id:rid(),variant_id:vid,quantity:1,unit_cost:1,reason:'xxx',adjustment_type:'outro'}),/inválido/);
+ }finally{await db.close();}});
+
+test('009: lista pré-preenchida pelo nome do sabor, salva configuração e aparece no snapshot',async()=>{const db=await database(ALL.slice(0,8));try{
+ await db.exec('set role authenticated');
+ await rpc(db,'record_purchase',{request_id:rid(),freight:0,new_products:[{key:'k',brand:'LOST MARY',model:'MT20000',price:92.16,minimum:0}],items:[{product_key:'k',variant_name:'NANA COCONUT',quantity:1,unit_cost:45},{product_key:'k',variant_name:'BERRY BURST',quantity:1,unit_cost:45},{product_key:'k',variant_name:'NOVO SABOR',quantity:1,unit_cost:45}]});
+ await db.exec('reset role');await migrate(db,['009_whatsapp_list.sql']);await db.exec('set role authenticated');
+ const p=(await db.query<{list_name:string;list_emoji:string;list_price:string;id:string}>('select id,list_name,list_emoji,list_price::text from products')).rows[0];
+ assert.deepEqual([p.list_name,p.list_emoji,+p.list_price],['LOST MARY 20K','💥',80]);
+ const vs=Object.fromEntries((await db.query<{name:string;e:string|null;l:string|null;d:string|null}>('select name,list_emoji e,list_label l,list_description d from variants')).rows.map(r=>[r.name,[r.e,r.l,r.d]]));
+ assert.deepEqual(vs['NANA COCONUT'],['🍌🥥','Banana Coconut','Banana com coco']);assert.deepEqual(vs['BERRY BURST'],['🫐',null,'Mix de frutas vermelhas']);assert.deepEqual(vs['NOVO SABOR'],[null,null,null]);
+ const st=(await db.query<{s:{settings:{list_header:string;list_footer:string}}}>('select public.get_state() s')).rows[0].s.settings;assert.equal(st.list_header,'📣 *LISTA ATUALIZADA*😉🔥');assert.ok(st.list_footer.includes('09h às 02h'));
+ const vid=(await db.query<{id:string}>("select id from variants where name='NOVO SABOR'")).rows[0].id;
+ await db.query('select public.save_list_settings($1::jsonb)',[JSON.stringify({header:'Topo',footer:'Fim',list_products:[{id:p.id,list_name:'LOST MARY 20K',list_emoji:'💥',list_price:85}],list_variants:[{id:vid,list_emoji:'🍋',list_label:'',list_description:'Limão'}]})]);
+ assert.equal((await db.query<{x:string}>('select list_price::text x from products')).rows[0].x,'85.00');
+ assert.deepEqual((await db.query<{e:string;d:string}>('select list_emoji e,list_description d from variants where id=$1',[vid])).rows[0],{e:'🍋',d:'Limão'});
+ await db.exec("set request.jwt.claim.sub='22222222-2222-4222-8222-222222222222'");await assert.rejects(db.query('select public.save_list_settings($1::jsonb)',['{}']),/autorizado/);
  }finally{await db.close();}});

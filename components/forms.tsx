@@ -3,8 +3,9 @@ import {useEffect,useRef,useState} from 'react';
 import {Lock,Plus,Trash2,X} from 'lucide-react';
 import {Action,Data,Line,Payload,Product,Sale,allocateFreight,saleBlockers,brl,canonicalCategory,categories,day,label,num,round} from '@/lib/domain';
 import {ComboOption,Combobox} from './combobox';
-export type ModalType='sale'|'batch'|'expense'|'product'|'adjust';
-export function EntryForm({type,data,product,sale,onSave,onClose,busy,error}:{type:ModalType;data:Data;product?:Product;sale?:Sale;onSave:(a:Action,p:Payload)=>Promise<boolean>;onClose:()=>void;busy:boolean;error:string}) {
+export type ModalType='sale'|'batch'|'expense'|'product'|'adjust'|'whatsapp';
+type EntryType=Exclude<ModalType,'whatsapp'>;
+export function EntryForm({type,data,product,sale,onSave,onClose,busy,error}:{type:EntryType;data:Data;product?:Product;sale?:Sale;onSave:(a:Action,p:Payload)=>Promise<boolean>;onClose:()=>void;busy:boolean;error:string}) {
  const dialog=useRef<HTMLDialogElement>(null);
  const saleItems=sale?data.sale_items.filter(i=>i.sale_id===sale.id):[];const reserved=(vid:string)=>saleItems.filter(i=>i.variant_id===vid).reduce((a,i)=>a+i.quantity,0);
  const itemsLocked=!!sale&&saleBlockers(data,sale.id,saleItems.map(i=>i.variant_id)).length>0;const blockersText=sale?saleBlockers(data,sale.id,saleItems.map(i=>i.variant_id)).join(', '):'';
