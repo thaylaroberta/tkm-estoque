@@ -56,3 +56,15 @@ test('categorias: mesma categoria com outra grafia não duplica o filtro',async(
  assert.equal(canonicalCategory('  POD ',[{category:'Pod'}]),'Pod');assert.equal(canonicalCategory('Narguilé  novo',[{category:'Pod'}]),'Narguilé novo');
  assert.equal(categoryKey('Essência'),categoryKey('essencia'));
 });
+test('desconto na venda: rateio, faturamento líquido, desconto exibido e lucro por produto',async()=>{
+ const {itemDiscount}=await import('../lib/domain');
+ let d=applyAction(emptyData(),'record_purchase',{freight:0,new_products:[{key:'a',brand:'ELFBAR',model:'ICE KING',price:133.11,minimum:0},{key:'b',brand:'LOST MARY',model:'MT',price:92.16,minimum:0}],items:[{product_key:'a',variant_name:'GRAPE',quantity:3,unit_cost:70},{product_key:'b',variant_name:'RAZZ',quantity:3,unit_cost:48}]});
+ const [g,r]=d.variants;
+ d=applyAction(d,'record_sale',{payment:'Pix',discount:25.27,items:[{variant_id:g.id,quantity:1,unit_price:133.11},{variant_id:r.id,quantity:1,unit_price:92.16}]});
+ d=applyAction(d,'record_sale',{payment:'Pix',items:[{variant_id:g.id,quantity:1,unit_price:100}]});
+ assert.deepEqual(d.sale_items.map(i=>i.discount),[14.93,10.34,0]);
+ const rep=report(d,'','');assert.equal(rep.productRevenue,300);assert.ok(Math.abs(rep.discounts-(25.27+33.11))<1e-9);assert.ok(Math.abs(rep.grossProducts-358.38)<1e-9);
+ const ice=rep.rows.find(x=>x.model==='ICE KING')!;assert.ok(Math.abs(ice.revenue-(133.11-14.93+100))<1e-9);assert.ok(Math.abs(ice.profit-(ice.revenue-140))<1e-9);
+ assert.equal(itemDiscount({quantity:1,unit_price:95,list_price:92.16}),0);
+ assert.throws(()=>applyAction(d,'record_sale',{payment:'Pix',discount:999,items:[{variant_id:g.id,quantity:1,unit_price:100}]}),/maior que o valor/);
+});

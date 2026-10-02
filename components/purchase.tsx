@@ -1,6 +1,7 @@
 'use client';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {Copy,Lock,Plus,Sparkles,Trash2,X} from 'lucide-react';
+import {Combobox} from './combobox';
 import {Action,Batch,Data,NewProduct,Payload,TARGET_MARGIN,brl,canonicalCategory,categories,day,num,productKey,purchaseBlockers,purchaseBreakdown,round} from '@/lib/domain';
 
 type DraftProduct={key:string;brand:string;model:string;category:string;minimum:number};
@@ -94,7 +95,9 @@ export function PurchaseForm({data,mode,batch,onSave,onClose,busy,error}:{data:D
        <option value={NEW}>+ Cadastrar novo produto</option></select></label>
       {line.product&&(isNew||!variants.length?<label>Sabor / variedade<input required maxLength={80} placeholder="Ex.: Menta" value={line.variantName} onChange={e=>setLine(line.uid,{variantName:e.target.value})}/></label>:
        line.variant===NEW?<label>Nova variedade<span className="input-with-action"><input required autoFocus maxLength={80} placeholder="Ex.: Uva gelada" value={line.variantName} onChange={e=>setLine(line.uid,{variantName:e.target.value})}/><button type="button" className="text-button" onClick={()=>setLine(line.uid,{variant:'',variantName:''})}>Escolher existente</button></span></label>:
-       <label>Sabor / variedade<select required value={line.variant} onChange={e=>setLine(line.uid,{variant:e.target.value,variantName:''})}><option value="" disabled>Selecione</option>{variants.map(v=><option key={v.id} value={'id:'+v.id}>{v.name} ({v.quantity} em estoque)</option>)}<option value={NEW}>+ Nova variedade</option></select></label>)}
+       <Combobox label="Sabor / variedade" required placeholder="Digite o sabor…" value={line.variant}
+        options={[...variants].sort((x,y)=>x.name.localeCompare(y.name,'pt-BR')).map(v=>({value:'id:'+v.id,label:v.name,detail:`${v.quantity} em estoque`})).concat([{value:NEW,label:'+ Nova variedade',detail:'cadastrar sabor novo'}])}
+        onChange={value=>setLine(line.uid,{variant:value,variantName:''})} onCreate={text=>setLine(line.uid,{variant:NEW,variantName:text})} createLabel={text=>`+ Cadastrar novo sabor “${text}”`}/>)}
      </div>
      {merged[line.product]&&<p className="merge-note">{merged[line.product]}</p>}
      {np&&<div className="new-product"><span className="badge neutral"><Sparkles size={13}/>Novo produto</span><div className="form-grid">

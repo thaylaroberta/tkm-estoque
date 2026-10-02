@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
 const UID='11111111-1111-4111-8111-111111111111';
-const ALL=['001_initial.sql','002_snapshot.sql','003_delivery.sql','004_purchase_flow.sql','005_edit_purchase.sql'];
+const ALL=['001_initial.sql','002_snapshot.sql','003_delivery.sql','004_purchase_flow.sql','005_edit_purchase.sql','006_sale_discount.sql'];
 async function migrate(db:PGlite,files:string[]){for(const file of files)await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));}
 async function database(files=ALL){const db=new PGlite();await db.exec(`create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth to authenticated,anon; grant execute on function auth.uid() to authenticated,anon; insert into auth.users values('${UID}');`);
  await migrate(db,files);
@@ -127,4 +127,26 @@ test('editar compra: desfaz e relança com custo médio correto; trava após ven
  // usuário não autorizado
  await db.exec("set request.jwt.claim.sub='22222222-2222-4222-8222-222222222222'");await assert.rejects(rpc(db,'delete_purchase',{request_id:rid(),batch_id:bid}),/autorizado/);
  await db.exec('reset role;set role anon');await assert.rejects(rpc(db,'update_purchase',edit),/permission denied/);
+ }finally{await db.close();}});
+
+test('006: vendas antigas ganham preço de tabela sem mudar faturamento; desconto em R$ rateado entre itens',async()=>{const db=await database(ALL.slice(0,5));try{
+ await db.exec('set role authenticated');
+ await rpc(db,'record_purchase',{request_id:rid(),freight:0,new_products:[{key:'k',brand:'ELFBAR',model:'ICE KING 40K',price:133.11,minimum:1},{key:'m',brand:'LOST MARY',model:'MT20000',price:92.16,minimum:1}],
+  items:[{product_key:'k',variant_name:'GRAPE ICE',quantity:5,unit_cost:70},{product_key:'k',variant_name:'MANGO',quantity:5,unit_cost:70},{product_key:'m',variant_name:'BLUE RAZZ',quantity:5,unit_cost:48}]});
+ const v=Object.fromEntries((await db.query<{id:string;name:string}>('select id,name from variants')).rows.map(r=>[r.name,r.id]));
+ const old1=await rpc(db,'record_sale',{request_id:rid(),payment:'Pix',items:[{variant_id:v['GRAPE ICE'],quantity:2,unit_price:100}]});
+ const old2=await rpc(db,'record_sale',{request_id:rid(),payment:'Pix',items:[{variant_id:v['BLUE RAZZ'],quantity:1,unit_price:95}]});
+ const before=(await db.query<{r:string;c:string}>('select sum(revenue)::text r,sum(cogs)::text c from sales')).rows[0];
+ await db.exec('reset role');await migrate(db,['006_sale_discount.sql']);await db.exec('set role authenticated');
+ assert.deepEqual((await db.query<{r:string;c:string}>('select sum(revenue)::text r,sum(cogs)::text c from sales')).rows[0],before);
+ const items=(await db.query<{list:string;unit:string;disc:string}>('select list_price::text list,unit_price::text unit,discount::text disc from sale_items where sale_id in ($1,$2) order by unit_price',[old1,old2])).rows;
+ assert.deepEqual(items.map(i=>[+i.list,+i.unit,+i.disc]),[[92.16,95,0],[133.11,100,0]]);
+ // nova venda: tabela 133,11 + 92,16, desconto R$ 25,27
+ const sid=await rpc(db,'record_sale',{request_id:rid(),payment:'Pix',discount:25.27,delivery_charged:10,items:[{variant_id:v['MANGO'],quantity:1,unit_price:133.11},{variant_id:v['BLUE RAZZ'],quantity:1,unit_price:92.16}]});
+ const s=(await db.query<{revenue:string;discount:string}>('select revenue::text,discount::text from sales where id=$1',[sid])).rows[0];assert.equal(+s.revenue,200);assert.equal(+s.discount,25.27);
+ const shares=(await db.query<{d:string}>('select discount::text d from sale_items where sale_id=$1 order by unit_price desc',[sid])).rows.map(r=>+r.d);
+ assert.equal(Math.round(shares.reduce((a,b)=>a+b,0)*100),2527);assert.deepEqual(shares,[14.93,10.34]);
+ await assert.rejects(rpc(db,'record_sale',{request_id:rid(),payment:'Pix',discount:500,items:[{variant_id:v['MANGO'],quantity:1,unit_price:133.11}]}),/maior que o valor/);
+ await assert.rejects(rpc(db,'record_sale',{request_id:rid(),payment:'Pix',discount:-1,items:[{variant_id:v['MANGO'],quantity:1,unit_price:133.11}]}),/negativo/);
+ assert.equal((await db.query<{q:number}>('select quantity q from variants where id=$1',[v['MANGO']])).rows[0].q,4);
  }finally{await db.close();}});

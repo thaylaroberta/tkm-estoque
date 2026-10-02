@@ -2,14 +2,14 @@ export type Product = {id:string;brand:string;model:string;category:string;price
 export type Variant = {id:string;product_id:string;name:string;quantity:number;value:number};
 export type Batch = {id:string;number:number;name:string;freight:number;other_costs?:number;merchandise:number;purchase_date?:string;updated_at?:string|null;created_at:string;request_id:string};
 export type BatchItem = {id:string;batch_id:string;variant_id:string;quantity:number;unit_cost:number;freight:number;other_costs?:number;effective_unit_cost?:number|null;avg_cost_after?:number|null;suggested_price?:number|null;sale_price?:number|null};
-export type Sale = {id:string;number:number;payment:string;revenue:number;cogs:number;card_fee:number;delivery_charged:number;delivery_cost:number;note:string;created_at:string;request_id:string};
-export type SaleItem = {id:string;sale_id:string;variant_id:string;quantity:number;unit_price:number;cogs:number};
+export type Sale = {id:string;number:number;payment:string;revenue:number;cogs:number;card_fee:number;discount?:number;delivery_charged:number;delivery_cost:number;note:string;created_at:string;request_id:string};
+export type SaleItem = {id:string;sale_id:string;variant_id:string;quantity:number;unit_price:number;list_price?:number|null;discount?:number;cogs:number};
 export type Expense = {id:string;category:string;description:string;amount:number;date:string;source:string;sale_id?:string;request_id:string};
 export type Movement = {id:string;variant_id:string;kind:'Entrada'|'Venda'|'Ajuste';quantity:number;value:number;reference_id:string;reason:string;created_at:string};
 export type Data = {batch_revisions?:string[];products:Product[];variants:Variant[];batches:Batch[];batch_items:BatchItem[];sales:Sale[];sale_items:SaleItem[];expenses:Expense[];movements:Movement[]};
 export type Line = {variant_id?:string;quantity:number;unit_cost?:number;unit_price?:number;product_id?:string;product_key?:string;variant_name?:string};
 export type NewProduct = {key:string;brand:string;model:string;category?:string;price:number;minimum?:number};
-export type Payload = {id?:string;request_id?:string;brand?:string;model?:string;category?:string;price?:number;minimum?:number;variants?:string[];items?:Line[];name?:string;freight?:number;payment?:string;card_fee?:number;delivery_charged?:number;delivery_cost?:number;note?:string;description?:string;amount?:number;date?:string;variant_id?:string;quantity?:number;reason?:string;unit_cost?:number;purchase_date?:string;other_costs?:number;new_products?:NewProduct[];price_updates?:{product_id:string;price:number}[];batch_id?:string};
+export type Payload = {id?:string;request_id?:string;brand?:string;model?:string;category?:string;price?:number;minimum?:number;variants?:string[];items?:Line[];name?:string;freight?:number;payment?:string;card_fee?:number;delivery_charged?:number;delivery_cost?:number;note?:string;description?:string;amount?:number;date?:string;variant_id?:string;quantity?:number;reason?:string;unit_cost?:number;purchase_date?:string;other_costs?:number;new_products?:NewProduct[];price_updates?:{product_id:string;price:number}[];batch_id?:string;discount?:number};
 export type Action = 'save_product'|'record_batch'|'record_purchase'|'update_purchase'|'rename_purchase'|'delete_purchase'|'record_sale'|'record_expense'|'adjust_stock';
 export const emptyData = ():Data => ({products:[],variants:[],batches:[],batch_items:[],sales:[],sale_items:[],expenses:[],movements:[]});
 export const brl = (value:number) => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(value);
@@ -34,6 +34,10 @@ export function purchaseBlockers(d:Data,batchId:string):string[] {
  const batch=d.batches.find(b=>b.id===batchId);if(!batch)return [];const vids=new Set(d.batch_items.filter(i=>i.batch_id===batchId).map(i=>i.variant_id));
  return [...new Set(d.movements.filter(m=>vids.has(m.variant_id)&&m.reference_id!==batchId&&m.created_at>=batch.created_at).map(m=>{const v=d.variants.find(x=>x.id===m.variant_id),p=d.products.find(x=>x.id===v?.product_id);return `${p?.model??''} · ${v?.name??''} (${m.kind.toLowerCase()})`;}))];
 }
+/** Desconto do item: diferença para a tabela (só quando vendido abaixo dela) + parte do desconto da venda. */
+export const itemDiscount = (i:{quantity:number;unit_price:number;list_price?:number|null;discount?:number}) => Math.max(0,i.quantity*((i.list_price??i.unit_price)-i.unit_price))+(i.discount??0);
+/** Receita líquida do item (o que efetivamente entrou). */
+export const itemRevenue = (i:{quantity:number;unit_price:number;discount?:number}) => i.quantity*i.unit_price-(i.discount??0);
 export const round = (n:number, digits=2) => Math.round((n+Number.EPSILON)*10**digits)/10**digits;
 const id = () => crypto.randomUUID();
 /** Margem bruta desejada sobre o preço de venda (não é markup sobre o custo). */
@@ -108,9 +112,12 @@ export function applyAction(original:Data,action:Action,p:Payload,now=new Date()
   if(!p.items?.length)throw Error('Adicione itens.');if(!['Pix','Dinheiro','Débito','Crédito'].includes(p.payment??''))throw Error('Pagamento inválido.');
   const fee=round(positive(p.card_fee??0,true));if(fee>0&&!['Débito','Crédito'].includes(p.payment!))throw Error('Taxa disponível apenas para cartão.');
   const charged=round(positive(p.delivery_charged??0,true)),delivery=round(positive(p.delivery_cost??0,true));
-  const sid=id();let revenue=0,cogs=0;
-  for(const l of p.items){const q=integer(l.quantity),price=round(positive(l.unit_price,true)),v=variant(l.variant_id);if(v.quantity<q)throw Error(`Estoque insuficiente para ${v.name}.`);const cost=q===v.quantity?v.value:round(v.value*q/v.quantity,6);v.quantity-=q;v.value=round(v.value-cost,6);revenue+=q*price;cogs+=cost;d.sale_items.push({id:id(),sale_id:sid,variant_id:v.id,quantity:q,unit_price:price,cogs:cost});move(v,'Venda',-q,-cost,sid,'Venda registrada');}
-  d.sales.push({id:sid,number:d.sales.length+1,payment:p.payment!,revenue:round(revenue),cogs:round(cogs,6),card_fee:fee,delivery_charged:charged,delivery_cost:delivery,note:p.note??'',created_at:now,request_id:rid});
+  const sid=id();let cogs=0;const disc=round(positive(p.discount??0,true));
+  const lines=p.items.map(l=>({l,q:integer(l.quantity),price:round(positive(l.unit_price,true)),v:variant(l.variant_id)}));const gross=lines.reduce((a,x)=>a+x.q*x.price,0);
+  if(disc>gross+1e-9)throw Error(`O desconto (${brl(disc)}) é maior que o valor dos produtos (${brl(gross)}).`);const shares=allocateCost(lines.map(x=>x.q*x.price),disc);
+  lines.forEach(({q,price,v},k)=>{if(v.quantity<q)throw Error(`Estoque insuficiente para ${v.name}.`);const cost=q===v.quantity?v.value:round(v.value*q/v.quantity,6);v.quantity-=q;v.value=round(v.value-cost,6);cogs+=cost;d.sale_items.push({id:id(),sale_id:sid,variant_id:v.id,quantity:q,unit_price:price,list_price:d.products.find(x=>x.id===v.product_id)?.price??price,discount:shares[k],cogs:cost});move(v,'Venda',-q,-cost,sid,'Venda registrada');});
+  const revenue=gross-disc;
+  d.sales.push({id:sid,number:Math.max(0,...d.sales.map(x=>x.number))+1,payment:p.payment!,revenue:round(revenue),cogs:round(cogs,6),card_fee:fee,discount:disc,delivery_charged:charged,delivery_cost:delivery,note:p.note??'',created_at:now,request_id:rid});
   if(delivery>0)d.expenses.push({id:id(),category:'Entrega',description:`Entrega da venda #${d.sales.length}`,amount:delivery,date:day(now),source:'venda',sale_id:sid,request_id:rid});
  } else if(action==='record_expense') {
   if(!['Anúncios','Entrega','Embalagem','Ferramentas/sistemas','Outros'].includes(p.category??'')||!p.description?.trim()||!p.date)throw Error('Preencha os dados da despesa.');
@@ -140,7 +147,7 @@ export function report(d:Data,from:string,to:string) {
  const loss=-d.movements.filter(m=>m.kind==='Ajuste'&&m.value<0&&within(m.created_at)).reduce((a,m)=>a+m.value,0);
  const stock=d.variants.reduce((a,v)=>a+v.quantity,0),capital=d.variants.reduce((a,v)=>a+v.value,0),potential=d.variants.reduce((a,v)=>a+v.quantity*(d.products.find(p=>p.id===v.product_id)?.price??0),0);
  const rows=d.products.map(p=>{
-  const variants=d.variants.filter(v=>v.product_id===p.id),vids=new Set(variants.map(v=>v.id)),pi=items.filter(i=>vids.has(i.variant_id));const units=pi.reduce((a,i)=>a+i.quantity,0),rev=pi.reduce((a,i)=>a+i.quantity*i.unit_price,0),cost=pi.reduce((a,i)=>a+i.cogs,0);
+  const variants=d.variants.filter(v=>v.product_id===p.id),vids=new Set(variants.map(v=>v.id)),pi=items.filter(i=>vids.has(i.variant_id));const units=pi.reduce((a,i)=>a+i.quantity,0),rev=pi.reduce((a,i)=>a+itemRevenue(i),0),cost=pi.reduce((a,i)=>a+i.cogs,0);
   const last=d.sales.filter(s=>d.sale_items.some(i=>i.sale_id===s.id&&vids.has(i.variant_id))).map(s=>s.created_at).sort().at(-1);
   const best=variants.map(v=>({name:v.name,units:pi.filter(i=>i.variant_id===v.id).reduce((a,i)=>a+i.quantity,0)})).sort((a,b)=>b.units-a.units)[0];
   const movements=d.movements.filter(m=>vids.has(m.variant_id));
@@ -148,7 +155,8 @@ export function report(d:Data,from:string,to:string) {
   const closing=movements.filter(m=>!to||day(m.created_at)<=to).reduce((a,m)=>a+m.quantity,0);const average=(opening+closing)/2;
   return {...p,units,revenue:rev,profit:rev-cost,margin:rev?(rev-cost)/rev*100:0,stock:variants.reduce((a,v)=>a+v.quantity,0),best:best?.units?best.name:'—',last,days:last?Math.floor((Date.parse(day()+'T12:00:00Z')-Date.parse(day(last)+'T12:00:00Z'))/86400000):null,turnover:average>0?units/average:null};
  });
- return {within,sales,items,expenses,revenue,productRevenue,deliveryRevenue,deliveryCost,deliveryProfit:deliveryRevenue-deliveryCost,cogs,expense,loss,stock,capital,potential,gross:revenue-cogs,net:revenue-cogs-expense-loss,units:items.reduce((a,i)=>a+i.quantity,0),rows,low:d.variants.filter(v=>v.quantity<=(d.products.find(p=>p.id===v.product_id)?.minimum??0))};
+ const discounts=items.reduce((a,i)=>a+itemDiscount(i),0);
+ return {within,sales,items,expenses,revenue,productRevenue,discounts,grossProducts:productRevenue+discounts,deliveryRevenue,deliveryCost,deliveryProfit:deliveryRevenue-deliveryCost,cogs,expense,loss,stock,capital,potential,gross:revenue-cogs,net:revenue-cogs-expense-loss,units:items.reduce((a,i)=>a+i.quantity,0),rows,low:d.variants.filter(v=>v.quantity<=(d.products.find(p=>p.id===v.product_id)?.minimum??0))};
 }
 export function exportCSV(rows:Record<string,unknown>[],filename:string) {
  if(!rows.length)return;const keys=Object.keys(rows[0]);const cell=(v:unknown)=>{let s=String(v??'');if(/^[=+\-@\t\r]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';};

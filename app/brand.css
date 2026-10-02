@@ -340,3 +340,42 @@ h1, h2, h3, .metric > strong { font-weight: 700; }
   .delete-hint { text-align: left; }
 }
 .purchase-modal input:disabled, .purchase-modal select:disabled { background: #f4f2f7; color: #8b8396; cursor: not-allowed; }
+
+/* ── Busca de sabor (combobox) ────────────────────────────────────────── */
+.combobox { position: relative; }
+.combobox-field { position: relative; display: block; }
+.combobox-field svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.combobox-field input { padding-left: 33px; }
+.combobox-list { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 5px; list-style: none; background: #fff; border: 1px solid #ddd5e9; border-radius: 10px; box-shadow: 0 14px 40px #210b3926; max-height: 264px; overflow-y: auto; font-weight: 400; }
+.combobox-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 7px; cursor: pointer; font-size: 13px; color: var(--tkm-black); }
+.combobox-list li small { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.combobox-list li.active { background: #f1e8ff; }
+.combobox-list li[aria-selected="true"] span { font-weight: 700; color: var(--tkm-purple); }
+.combobox-list li.disabled { cursor: not-allowed; opacity: .45; }
+.combobox-list li.create { color: var(--tkm-purple); font-weight: 600; border-top: 1px solid var(--line); border-radius: 0 0 7px 7px; }
+.combobox-list .empty-option { color: var(--muted); cursor: default; }
+.item-line .combobox { margin: 0; font-size: 10px; }
+.item-line .combobox input { font-size: 12px; padding-top: 9px; padding-bottom: 9px; }
+
+/* ── Desconto na venda ────────────────────────────────────────────────── */
+.list-diff { font-weight: 400; color: var(--muted); }
+.sale-summary { display: grid; grid-template-columns: 220px 1fr; gap: 18px; align-items: start; border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 6px 0 4px; background: #fcfaff; }
+.sale-summary .discount-field { margin: 0; }
+.sale-summary .discount-field input { font-size: 16px; font-weight: 600; }
+.sale-summary dl { margin: 0; display: grid; gap: 6px; font-size: 12px; }
+.sale-summary dl div { display: flex; justify-content: space-between; gap: 12px; }
+.sale-summary dt { color: var(--muted); }
+.sale-summary dd { margin: 0; font-weight: 600; }
+.sale-summary .strong { border-top: 1px solid var(--line); padding-top: 6px; font-size: 13px; }
+.sale-summary .strong dt { color: var(--tkm-black); font-weight: 600; }
+.sale-summary .muted-row dd { font-weight: 500; }
+.sale-summary .error { grid-column: 1 / -1; margin: 0; }
+
+/* ── Filtros do estoque ───────────────────────────────────────────────── */
+.stock-toolbar { flex-wrap: wrap; gap: 12px 16px; }
+.stock-toolbar .category-filter select { min-width: 150px; }
+.inline-clear { display: inline-flex; margin-left: 8px; font-size: 11px; padding: 0; }
+@media (max-width: 600px) {
+  .sale-summary { grid-template-columns: 1fr; }
+  .stock-toolbar .category-filter select { min-width: 0; }
+}
