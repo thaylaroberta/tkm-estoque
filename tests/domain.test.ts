@@ -49,3 +49,10 @@ test('compra cria produto do zero, só movimenta estoque ao finalizar e recalcul
  const u2=d.variants.find(v=>v.id===uva.id)!;assert.equal(u2.quantity,6);assert.ok(Math.abs(u2.value/u2.quantity-(66+120)/6)<1e-9);assert.equal(d.sales[0].cogs,cogs);assert.equal(d.products.find(p=>p.model==='Pod')!.price,100);
  assert.equal(d.movements.filter(m=>m.kind==='Entrada').length,3);
 });
+test('categorias: mesma categoria com outra grafia não duplica o filtro',async()=>{
+ const {categories,canonicalCategory,categoryKey}=await import('../lib/domain');
+ const list=categories([{category:'Pod'},{category:' pod '},{category:'Pód'},{category:'Essência'},{category:''}]);
+ assert.deepEqual(list.map(c=>[c.name,c.count]),[['Essência',1],['Geral',1],['Pod',3]]);
+ assert.equal(canonicalCategory('  POD ',[{category:'Pod'}]),'Pod');assert.equal(canonicalCategory('Narguilé  novo',[{category:'Pod'}]),'Narguilé novo');
+ assert.equal(categoryKey('Essência'),categoryKey('essencia'));
+});

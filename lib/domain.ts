@@ -16,6 +16,16 @@ export const brl = (value:number) => new Intl.NumberFormat('pt-BR',{style:'curre
 export const num = (value:number) => new Intl.NumberFormat('pt-BR',{maximumFractionDigits:2}).format(value);
 export const day = (value:string|Date=new Date()) => new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(value));
 export const dateBR = (value:string) => new Intl.DateTimeFormat('pt-BR',{timeZone:'America/Sao_Paulo'}).format(new Date(value.length===10?value+'T12:00:00Z':value));
+/** Compara categorias ignorando maiúsculas, acentos e espaços extras: "Pod", " pod" e "Pód" são a mesma categoria. */
+export const categoryKey = (value:string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().replace(/\s+/g,' ').toLowerCase();
+/** Categorias existentes, sem duplicatas de grafia, em ordem alfabética, com a quantidade de produtos. */
+export function categories(products:{category:string}[]) {
+ const map=new Map<string,{name:string;count:number}>();
+ for(const p of products){const key=categoryKey(p.category||'Geral');const item=map.get(key);if(item)item.count++;else map.set(key,{name:(p.category||'Geral').trim(),count:1});}
+ return [...map.values()].sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
+}
+/** Usa a grafia já cadastrada quando a categoria digitada é a mesma com outra caixa/acento. */
+export const canonicalCategory = (value:string,products:{category:string}[]) => {const key=categoryKey(value);if(!key)return '';return categories(products).find(c=>categoryKey(c.name)===key)?.name??value.trim().replace(/\s+/g,' ');};
 export const round = (n:number, digits=2) => Math.round((n+Number.EPSILON)*10**digits)/10**digits;
 const id = () => crypto.randomUUID();
 /** Margem bruta desejada sobre o preço de venda (não é markup sobre o custo). */

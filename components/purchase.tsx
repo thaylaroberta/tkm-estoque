@@ -1,7 +1,7 @@
 'use client';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {Plus,Sparkles,Trash2,X} from 'lucide-react';
-import {Action,Data,NewProduct,Payload,TARGET_MARGIN,brl,day,num,purchaseBreakdown,round} from '@/lib/domain';
+import {Action,Data,NewProduct,Payload,TARGET_MARGIN,brl,canonicalCategory,categories,day,num,purchaseBreakdown,round} from '@/lib/domain';
 
 type DraftProduct={key:string;brand:string;model:string;category:string;minimum:number};
 type DraftLine={uid:string;product:string;variant:string;variantName:string;quantity:number;unitCost:number};
@@ -80,7 +80,7 @@ export function PurchaseForm({data,mode,onSave,onClose,busy,error}:{data:Data;mo
      {np&&<div className="new-product"><span className="badge neutral"><Sparkles size={13}/>Novo produto</span><div className="form-grid">
       <label>Marca<input required maxLength={80} value={np.brand} onChange={e=>setProduct(np.key,{brand:e.target.value})}/></label>
       <label>Modelo<input required maxLength={100} value={np.model} onChange={e=>setProduct(np.key,{model:e.target.value})}/></label>
-      <label>Categoria (opcional)<input maxLength={80} placeholder="Geral" value={np.category} onChange={e=>setProduct(np.key,{category:e.target.value})}/></label>
+      <label>Categoria (opcional)<input maxLength={80} placeholder="Geral" list="tkm-categories" autoComplete="off" value={np.category} onChange={e=>setProduct(np.key,{category:e.target.value})} onBlur={e=>setProduct(np.key,{category:canonicalCategory(e.target.value,[...data.products,...draft.products.filter(p=>p.key!==np.key)])})}/></label>
       <label>Estoque mínimo por sabor<input type="number" min="0" step="1" value={np.minimum} onChange={e=>setProduct(np.key,{minimum:Number(e.target.value)})}/></label>
      </div><p className="hint">O cadastro não gera estoque sozinho: as unidades entram quando a compra for finalizada.</p></div>}
      <div className="form-grid">
@@ -106,6 +106,7 @@ export function PurchaseForm({data,mode,onSave,onClose,busy,error}:{data:Data;mo
    <div className="purchase-summary"><div><span>Mercadorias</span><strong>{brl(breakdown.merchandise)}</strong></div><div><span>Frete</span><strong>{brl(draft.freight)}</strong></div>{draft.other>0&&<div><span>Outros custos</span><strong>{brl(draft.other)}</strong></div>}<div className="total"><span>Custo total da compra</span><strong>{brl(breakdown.total)}</strong></div></div>
    {!hasCosts&&<p className="hint">Informe quantidade e custo para ver o rateio, o custo efetivo e o preço sugerido.</p>}
   </fieldset>{error&&<p className="error" role="alert">{error}</p>}
+  <datalist id="tkm-categories">{categories([...data.products,...draft.products.filter(p=>p.category.trim())]).map(c=><option key={c.name} value={c.name}/>)}</datalist>
   <div className="modal-footer"><button type="button" className="button secondary" disabled={busy} onClick={onClose}>Fechar (mantém rascunho)</button><button className="button" disabled={busy||!hasCosts}>{busy?'Finalizando…':'Finalizar compra'}</button></div>
  </form></dialog>;
 }
