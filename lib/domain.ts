@@ -2,15 +2,15 @@ export type Product = {id:string;brand:string;model:string;category:string;price
 export type Variant = {id:string;product_id:string;name:string;quantity:number;value:number};
 export type Batch = {id:string;number:number;name:string;freight:number;other_costs?:number;merchandise:number;purchase_date?:string;updated_at?:string|null;created_at:string;request_id:string};
 export type BatchItem = {id:string;batch_id:string;variant_id:string;quantity:number;unit_cost:number;freight:number;other_costs?:number;effective_unit_cost?:number|null;avg_cost_after?:number|null;suggested_price?:number|null;sale_price?:number|null};
-export type Sale = {id:string;number:number;payment:string;revenue:number;cogs:number;card_fee:number;discount?:number;delivery_charged:number;delivery_cost:number;note:string;created_at:string;request_id:string};
+export type Sale = {id:string;number:number;payment:string;revenue:number;cogs:number;card_fee:number;discount?:number;delivery_charged:number;delivery_cost:number;note:string;updated_at?:string|null;created_at:string;request_id:string};
 export type SaleItem = {id:string;sale_id:string;variant_id:string;quantity:number;unit_price:number;list_price?:number|null;discount?:number;cogs:number};
 export type Expense = {id:string;category:string;description:string;amount:number;date:string;source:string;sale_id?:string;request_id:string};
 export type Movement = {id:string;variant_id:string;kind:'Entrada'|'Venda'|'Ajuste';quantity:number;value:number;reference_id:string;reason:string;created_at:string};
 export type Data = {batch_revisions?:string[];products:Product[];variants:Variant[];batches:Batch[];batch_items:BatchItem[];sales:Sale[];sale_items:SaleItem[];expenses:Expense[];movements:Movement[]};
 export type Line = {variant_id?:string;quantity:number;unit_cost?:number;unit_price?:number;product_id?:string;product_key?:string;variant_name?:string};
 export type NewProduct = {key:string;brand:string;model:string;category?:string;price:number;minimum?:number};
-export type Payload = {id?:string;request_id?:string;brand?:string;model?:string;category?:string;price?:number;minimum?:number;variants?:string[];items?:Line[];name?:string;freight?:number;payment?:string;card_fee?:number;delivery_charged?:number;delivery_cost?:number;note?:string;description?:string;amount?:number;date?:string;variant_id?:string;quantity?:number;reason?:string;unit_cost?:number;purchase_date?:string;other_costs?:number;new_products?:NewProduct[];price_updates?:{product_id:string;price:number}[];batch_id?:string;discount?:number};
-export type Action = 'save_product'|'record_batch'|'record_purchase'|'update_purchase'|'rename_purchase'|'delete_purchase'|'record_sale'|'record_expense'|'adjust_stock';
+export type Payload = {id?:string;request_id?:string;brand?:string;model?:string;category?:string;price?:number;minimum?:number;variants?:string[];items?:Line[];name?:string;freight?:number;payment?:string;card_fee?:number;delivery_charged?:number;delivery_cost?:number;note?:string;description?:string;amount?:number;date?:string;variant_id?:string;quantity?:number;reason?:string;unit_cost?:number;purchase_date?:string;other_costs?:number;new_products?:NewProduct[];price_updates?:{product_id:string;price:number}[];batch_id?:string;sale_id?:string;discount?:number};
+export type Action = 'save_product'|'record_batch'|'record_purchase'|'update_purchase'|'rename_purchase'|'delete_purchase'|'update_sale'|'delete_sale'|'record_sale'|'record_expense'|'adjust_stock';
 export const emptyData = ():Data => ({products:[],variants:[],batches:[],batch_items:[],sales:[],sale_items:[],expenses:[],movements:[]});
 export const brl = (value:number) => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(value);
 export const num = (value:number) => new Intl.NumberFormat('pt-BR',{maximumFractionDigits:2}).format(value);
@@ -38,6 +38,11 @@ export function purchaseBlockers(d:Data,batchId:string):string[] {
 export const itemDiscount = (i:{quantity:number;unit_price:number;list_price?:number|null;discount?:number}) => Math.max(0,i.quantity*((i.list_price??i.unit_price)-i.unit_price))+(i.discount??0);
 /** Receita líquida do item (o que efetivamente entrou). */
 export const itemRevenue = (i:{quantity:number;unit_price:number;discount?:number}) => i.quantity*i.unit_price-(i.discount??0);
+/** Sabores que tiveram compra ou ajuste depois da venda (trava a troca de itens). */
+export function saleBlockers(d:Data,saleId:string,vids:string[]):string[] {
+ const sale=d.sales.find(x=>x.id===saleId);if(!sale)return [];const set=new Set(vids);
+ return [...new Set(d.movements.filter(m=>set.has(m.variant_id)&&(m.kind==='Entrada'||m.kind==='Ajuste')&&m.created_at>sale.created_at).map(m=>{const v=d.variants.find(x=>x.id===m.variant_id),p=d.products.find(x=>x.id===v?.product_id);return `${p?.model??''} · ${v?.name??''} (${m.kind.toLowerCase()})`;}))];
+}
 export const round = (n:number, digits=2) => Math.round((n+Number.EPSILON)*10**digits)/10**digits;
 const id = () => crypto.randomUUID();
 /** Margem bruta desejada sobre o preço de venda (não é markup sobre o custo). */
@@ -108,17 +113,36 @@ export function applyAction(original:Data,action:Action,p:Payload,now=new Date()
   else{batch={id:id(),number:Math.max(0,...d.batches.map(x=>x.number))+1,name:p.name?.trim()||'Compra',freight,other_costs:other,merchandise:round(b.merchandise),purchase_date:date,created_at:now,request_id:rid};d.batches.push(batch);}
   const stamp=batch.created_at;
   p.items.forEach((l,i)=>{const v=variant(vids[i]),c=b.lines[i];v.quantity+=l.quantity;v.value=round(v.value+c.effective,6);const price=d.products.find(x=>x.id===v.product_id)!.price;d.batch_items.push({id:id(),batch_id:batch!.id,variant_id:v.id,quantity:l.quantity,unit_cost:round(l.unit_cost!),freight:c.freight,other_costs:c.other,effective_unit_cost:c.unit,avg_cost_after:round(v.value/v.quantity,6),suggested_price:c.suggested,sale_price:price});d.movements.push({id:id(),variant_id:v.id,kind:'Entrada',quantity:l.quantity,value:c.effective,reference_id:batch!.id,reason:'Compra com frete rateado',created_at:stamp});});
- } else if(action==='record_sale') {
+ } else if(action==='record_sale'||action==='update_sale'||action==='delete_sale') {
+  let existing:Sale|undefined;
+  if(action!=='record_sale'){if((d.batch_revisions??[]).includes(rid))return d;existing=d.sales.find(x=>x.id===p.sale_id);if(!existing)throw Error('Venda não encontrada.');d.batch_revisions=[...(d.batch_revisions??[]),rid];}
+  const syncExpense=(sale:Sale)=>{d.expenses=d.expenses.filter(e=>e.sale_id!==sale.id);if((sale.delivery_cost??0)>0)d.expenses.push({id:id(),category:'Entrega',description:`Entrega da venda #${sale.number}`,amount:sale.delivery_cost!,date:day(sale.created_at),source:'venda',sale_id:sale.id,request_id:sale.request_id});};
+  const reverse=(sale:Sale)=>{for(const i of d.sale_items.filter(i=>i.sale_id===sale.id)){const v=variant(i.variant_id);v.quantity+=i.quantity;v.value=round(v.value+i.cogs,6);}d.sale_items=d.sale_items.filter(i=>i.sale_id!==sale.id);d.movements=d.movements.filter(m=>!(m.kind==='Venda'&&m.reference_id===sale.id));};
+  if(action==='delete_sale'){reverse(existing!);d.expenses=d.expenses.filter(e=>e.sale_id!==existing!.id);d.sales=d.sales.filter(x=>x.id!==existing!.id);return d;}
   if(!p.items?.length)throw Error('Adicione itens.');if(!['Pix','Dinheiro','Débito','Crédito'].includes(p.payment??''))throw Error('Pagamento inválido.');
   const fee=round(positive(p.card_fee??0,true));if(fee>0&&!['Débito','Crédito'].includes(p.payment!))throw Error('Taxa disponível apenas para cartão.');
   const charged=round(positive(p.delivery_charged??0,true)),delivery=round(positive(p.delivery_cost??0,true));
-  const sid=id();let cogs=0;const disc=round(positive(p.discount??0,true));
+  let cogs=0;const disc=round(positive(p.discount??0,true));
   const lines=p.items.map(l=>({l,q:integer(l.quantity),price:round(positive(l.unit_price,true)),v:variant(l.variant_id)}));const gross=lines.reduce((a,x)=>a+x.q*x.price,0);
   if(disc>gross+1e-9)throw Error(`O desconto (${brl(disc)}) é maior que o valor dos produtos (${brl(gross)}).`);const shares=allocateCost(lines.map(x=>x.q*x.price),disc);
-  lines.forEach(({q,price,v},k)=>{if(v.quantity<q)throw Error(`Estoque insuficiente para ${v.name}.`);const cost=q===v.quantity?v.value:round(v.value*q/v.quantity,6);v.quantity-=q;v.value=round(v.value-cost,6);cogs+=cost;d.sale_items.push({id:id(),sale_id:sid,variant_id:v.id,quantity:q,unit_price:price,list_price:d.products.find(x=>x.id===v.product_id)?.price??price,discount:shares[k],cogs:cost});move(v,'Venda',-q,-cost,sid,'Venda registrada');});
-  const revenue=gross-disc;
-  d.sales.push({id:sid,number:Math.max(0,...d.sales.map(x=>x.number))+1,payment:p.payment!,revenue:round(revenue),cogs:round(cogs,6),card_fee:fee,discount:disc,delivery_charged:charged,delivery_cost:delivery,note:p.note??'',created_at:now,request_id:rid});
-  if(delivery>0)d.expenses.push({id:id(),category:'Entrega',description:`Entrega da venda #${d.sales.length}`,amount:delivery,date:day(now),source:'venda',sale_id:sid,request_id:rid});
+  const fields={payment:p.payment!,card_fee:fee,discount:disc,delivery_charged:charged,delivery_cost:delivery,note:p.note??''};
+  if(existing){
+   const old=d.sale_items.filter(i=>i.sale_id===existing!.id);const key=(a:{variant_id?:string;quantity:number}[])=>a.map(x=>`${x.variant_id}:${x.quantity}`).sort().join('|');
+   if(key(old)===key(p.items)){ // só financeiro: CMV e estoque intactos
+    const pool=[...old];lines.forEach((x,k)=>{const i=pool.splice(pool.findIndex(o=>o.variant_id===x.v.id&&o.quantity===x.q),1)[0];i.unit_price=x.price;i.discount=shares[k];});
+    Object.assign(existing,fields,{revenue:round(gross-disc),updated_at:now});syncExpense(existing);return d;
+   }
+   const blockers=saleBlockers(d,existing.id,[...old.map(i=>i.variant_id),...lines.map(x=>x.v.id)]);
+   if(blockers.length)throw Error(`Depois desta venda houve compra ou ajuste em ${blockers.join(', ')}. Para não alterar custos, só dá para mudar preço, desconto, pagamento e entrega. Para trocar sabor ou quantidade, exclua a venda e lance de novo.`);
+   const keep=new Map(old.map(i=>[i.variant_id,i.list_price]));reverse(existing);
+   lines.forEach(x=>{x.l.unit_cost=keep.get(x.v.id)??undefined;});
+  }
+  const sale:Sale=existing??{id:id(),number:Math.max(0,...d.sales.map(x=>x.number))+1,revenue:0,cogs:0,created_at:now,request_id:rid,...fields};
+  lines.forEach(({l,q,price,v},k)=>{if(v.quantity<q)throw Error(`Estoque insuficiente para ${v.name}.`);const cost=q===v.quantity?v.value:round(v.value*q/v.quantity,6);v.quantity-=q;v.value=round(v.value-cost,6);cogs+=cost;
+   d.sale_items.push({id:id(),sale_id:sale.id,variant_id:v.id,quantity:q,unit_price:price,list_price:(existing?l.unit_cost:undefined)??d.products.find(x=>x.id===v.product_id)?.price??price,discount:shares[k],cogs:cost});
+   d.movements.push({id:id(),variant_id:v.id,kind:'Venda',quantity:-q,value:-cost,reference_id:sale.id,reason:'Venda registrada',created_at:sale.created_at});});
+  Object.assign(sale,fields,{revenue:round(gross-disc),cogs:round(cogs,6)});if(existing)sale.updated_at=now;else d.sales.push(sale);
+  syncExpense(sale);
  } else if(action==='record_expense') {
   if(!['Anúncios','Entrega','Embalagem','Ferramentas/sistemas','Outros'].includes(p.category??'')||!p.description?.trim()||!p.date)throw Error('Preencha os dados da despesa.');
   d.expenses.push({id:id(),category:p.category!,description:p.description.trim(),amount:round(positive(p.amount)),date:p.date,source:'manual',request_id:rid});

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
 const UID='11111111-1111-4111-8111-111111111111';
-const ALL=['001_initial.sql','002_snapshot.sql','003_delivery.sql','004_purchase_flow.sql','005_edit_purchase.sql','006_sale_discount.sql'];
+const ALL=['001_initial.sql','002_snapshot.sql','003_delivery.sql','004_purchase_flow.sql','005_edit_purchase.sql','006_sale_discount.sql','007_edit_sale.sql'];
 async function migrate(db:PGlite,files:string[]){for(const file of files)await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));}
 async function database(files=ALL){const db=new PGlite();await db.exec(`create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth to authenticated,anon; grant execute on function auth.uid() to authenticated,anon; insert into auth.users values('${UID}');`);
  await migrate(db,files);
@@ -149,4 +149,37 @@ test('006: vendas antigas ganham preço de tabela sem mudar faturamento; descont
  await assert.rejects(rpc(db,'record_sale',{request_id:rid(),payment:'Pix',discount:500,items:[{variant_id:v['MANGO'],quantity:1,unit_price:133.11}]}),/maior que o valor/);
  await assert.rejects(rpc(db,'record_sale',{request_id:rid(),payment:'Pix',discount:-1,items:[{variant_id:v['MANGO'],quantity:1,unit_price:133.11}]}),/negativo/);
  assert.equal((await db.query<{q:number}>('select quantity q from variants where id=$1',[v['MANGO']])).rows[0].q,4);
+ }finally{await db.close();}});
+
+test('007: editar venda (financeiro e troca de itens), trava após compra, excluir devolve estoque e remove entrega',async()=>{const db=await database();try{
+ await db.exec('set role authenticated');
+ await rpc(db,'record_purchase',{request_id:rid(),freight:0,new_products:[{key:'k',brand:'ELFBAR',model:'ICE KING',price:133.11,minimum:0}],items:[{product_key:'k',variant_name:'GRAPE',quantity:5,unit_cost:70},{product_key:'k',variant_name:'MANGO',quantity:5,unit_cost:60}]});
+ const v=Object.fromEntries((await db.query<{id:string;name:string}>('select id,name from variants')).rows.map(r=>[r.name,r.id]));
+ const sid=await rpc(db,'record_sale',{request_id:rid(),payment:'Pix',delivery_charged:10,items:[{variant_id:v.GRAPE,quantity:1,unit_price:100}]});
+ const stock=async()=>Object.fromEntries((await db.query<{name:string;quantity:number;value:string}>('select name,quantity,value::text from variants')).rows.map(r=>[r.name,[r.quantity,+r.value]]));
+ // 1) edição financeira: preço, desconto, pagamento, custo de entrega → CMV e estoque intactos, despesa criada
+ const e1={request_id:rid(),sale_id:sid,payment:'Crédito',card_fee:3,discount:5,delivery_charged:10,delivery_cost:7,note:'corrigido',items:[{variant_id:v.GRAPE,quantity:1,unit_price:110}]};
+ assert.equal(await rpc(db,'update_sale',e1),sid);assert.equal(await rpc(db,'update_sale',e1),sid);
+ let s=(await db.query<{revenue:string;cogs:string;payment:string;discount:string;number:string}>('select revenue::text,cogs::text,payment,discount::text,number::text from sales')).rows[0];
+ assert.deepEqual([+s.revenue,+s.cogs,s.payment,+s.discount,s.number],[105,70,'Crédito',5,'1']);
+ assert.deepEqual((await stock()).GRAPE,[4,280]);
+ assert.equal((await db.query<{a:string}>('select amount::text a from expenses where sale_id=$1',[sid])).rows[0].a,'7.00');
+ // 2) troca de sabor/quantidade: estorna e relança (mesmo número, preço de tabela preservado)
+ await rpc(db,'update_sale',{request_id:rid(),sale_id:sid,payment:'Pix',delivery_charged:10,delivery_cost:0,items:[{variant_id:v.MANGO,quantity:2,unit_price:100}]});
+ const st=await stock();assert.deepEqual(st.GRAPE,[5,350]);assert.deepEqual(st.MANGO,[3,180]);
+ s=(await db.query<{revenue:string;cogs:string;payment:string;discount:string;number:string}>('select revenue::text,cogs::text,payment,discount::text,number::text from sales')).rows[0];assert.deepEqual([+s.revenue,+s.cogs,s.number],[200,120,'1']);
+ assert.equal((await db.query<{n:string}>('select count(*)::text n from expenses')).rows[0].n,'0');
+ assert.equal((await db.query<{n:string}>("select count(*)::text n from movements where kind='Venda'")).rows[0].n,'1');
+ // 3) compra posterior do sabor: troca de itens travada, edição financeira liberada
+ await rpc(db,'record_purchase',{request_id:rid(),freight:0,items:[{variant_id:v.MANGO,quantity:1,unit_cost:90}]});
+ await assert.rejects(rpc(db,'update_sale',{request_id:rid(),sale_id:sid,payment:'Pix',items:[{variant_id:v.MANGO,quantity:1,unit_price:100}]}),/compra ou ajuste/);
+ await rpc(db,'update_sale',{request_id:rid(),sale_id:sid,payment:'Pix',discount:20,items:[{variant_id:v.MANGO,quantity:2,unit_price:100}]});
+ assert.equal((await db.query<{r:string}>('select revenue::text r from sales')).rows[0].r,'180.00');
+ // 4) excluir: unidades voltam pelo custo de saída, venda e despesa somem, histórico guardado
+ await rpc(db,'update_sale',{request_id:rid(),sale_id:sid,payment:'Pix',delivery_cost:5,items:[{variant_id:v.MANGO,quantity:2,unit_price:100}]});
+ await rpc(db,'delete_sale',{request_id:rid(),sale_id:sid});
+ assert.deepEqual((await stock()).MANGO,[6,390]);
+ assert.equal((await db.query<{n:string}>('select ((select count(*) from sales)+(select count(*) from sale_items)+(select count(*) from expenses)+(select count(*) from movements where kind=\'Venda\'))::text n')).rows[0].n,'0');
+ assert.equal((await db.query<{n:string}>('select count(*)::text n from sale_revisions')).rows[0].n,'5');
+ await db.exec("set request.jwt.claim.sub='22222222-2222-4222-8222-222222222222'");await assert.rejects(rpc(db,'delete_sale',{request_id:rid(),sale_id:sid}),/autorizado/);
  }finally{await db.close();}});

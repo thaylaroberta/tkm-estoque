@@ -68,3 +68,16 @@ test('desconto na venda: rateio, faturamento líquido, desconto exibido e lucro 
  assert.equal(itemDiscount({quantity:1,unit_price:95,list_price:92.16}),0);
  assert.throws(()=>applyAction(d,'record_sale',{payment:'Pix',discount:999,items:[{variant_id:g.id,quantity:1,unit_price:100}]}),/maior que o valor/);
 });
+test('demo: editar venda (financeiro mantém CMV; troca de itens estorna), trava após compra e excluir',()=>{
+ let d=applyAction(emptyData(),'record_purchase',{freight:0,new_products:[{key:'k',brand:'ELFBAR',model:'ICE',price:133.11,minimum:0}],items:[{product_key:'k',variant_name:'GRAPE',quantity:5,unit_cost:70},{product_key:'k',variant_name:'MANGO',quantity:5,unit_cost:60}]},'2026-10-01T10:00:00.000Z');
+ const [g,m]=d.variants;
+ d=applyAction(d,'record_sale',{payment:'Pix',delivery_charged:10,items:[{variant_id:g.id,quantity:1,unit_price:100}]},'2026-10-01T11:00:00.000Z');const sid=d.sales[0].id;
+ d=applyAction(d,'update_sale',{sale_id:sid,payment:'Crédito',card_fee:3,discount:5,delivery_charged:10,delivery_cost:7,items:[{variant_id:g.id,quantity:1,unit_price:110}]},'2026-10-01T12:00:00.000Z');
+ assert.deepEqual([d.sales[0].revenue,d.sales[0].cogs,d.sales[0].payment,d.expenses.length,d.expenses[0].amount],[105,70,'Crédito',1,7]);
+ d=applyAction(d,'update_sale',{sale_id:sid,payment:'Pix',items:[{variant_id:m.id,quantity:2,unit_price:100}]},'2026-10-01T12:30:00.000Z');
+ assert.deepEqual([d.variants[0].quantity,d.variants[0].value,d.variants[1].quantity,d.sales[0].cogs,d.sales[0].number,d.expenses.length],[5,350,3,120,1,0]);
+ d=applyAction(d,'record_purchase',{freight:0,items:[{variant_id:m.id,quantity:1,unit_cost:90}]},'2026-10-01T13:00:00.000Z');
+ assert.throws(()=>applyAction(d,'update_sale',{sale_id:sid,payment:'Pix',items:[{variant_id:m.id,quantity:1,unit_price:100}]}),/compra ou ajuste/);
+ d=applyAction(d,'delete_sale',{sale_id:sid});
+ assert.deepEqual([d.variants[1].quantity,d.variants[1].value,d.sales.length,d.sale_items.length],[6,390,0,0]);
+});

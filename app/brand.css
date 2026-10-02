@@ -379,3 +379,7 @@ h1, h2, h3, .metric > strong { font-weight: 700; }
   .sale-summary { grid-template-columns: 1fr; }
   .stock-toolbar .category-filter select { min-width: 0; }
 }
+.inline-fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.modal input:disabled, .modal select:disabled { background: #f4f2f7; color: #8b8396; cursor: not-allowed; }
+.edited-tag { display: block; font-size: 10px; color: var(--muted); margin-top: 3px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
