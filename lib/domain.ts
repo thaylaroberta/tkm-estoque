@@ -1,15 +1,16 @@
 export type Product = {id:string;brand:string;model:string;category:string;price:number;minimum:number};
 export type Variant = {id:string;product_id:string;name:string;quantity:number;value:number};
-export type Batch = {id:string;number:number;name:string;freight:number;merchandise:number;created_at:string;request_id:string};
-export type BatchItem = {id:string;batch_id:string;variant_id:string;quantity:number;unit_cost:number;freight:number};
+export type Batch = {id:string;number:number;name:string;freight:number;other_costs?:number;merchandise:number;purchase_date?:string;created_at:string;request_id:string};
+export type BatchItem = {id:string;batch_id:string;variant_id:string;quantity:number;unit_cost:number;freight:number;other_costs?:number;effective_unit_cost?:number|null;avg_cost_after?:number|null;suggested_price?:number|null;sale_price?:number|null};
 export type Sale = {id:string;number:number;payment:string;revenue:number;cogs:number;card_fee:number;delivery_charged:number;delivery_cost:number;note:string;created_at:string;request_id:string};
 export type SaleItem = {id:string;sale_id:string;variant_id:string;quantity:number;unit_price:number;cogs:number};
 export type Expense = {id:string;category:string;description:string;amount:number;date:string;source:string;sale_id?:string;request_id:string};
 export type Movement = {id:string;variant_id:string;kind:'Entrada'|'Venda'|'Ajuste';quantity:number;value:number;reference_id:string;reason:string;created_at:string};
 export type Data = {products:Product[];variants:Variant[];batches:Batch[];batch_items:BatchItem[];sales:Sale[];sale_items:SaleItem[];expenses:Expense[];movements:Movement[]};
-export type Line = {variant_id:string;quantity:number;unit_cost?:number;unit_price?:number};
-export type Payload = {id?:string;request_id?:string;brand?:string;model?:string;category?:string;price?:number;minimum?:number;variants?:string[];items?:Line[];name?:string;freight?:number;payment?:string;card_fee?:number;delivery_charged?:number;delivery_cost?:number;note?:string;description?:string;amount?:number;date?:string;variant_id?:string;quantity?:number;reason?:string;unit_cost?:number};
-export type Action = 'save_product'|'record_batch'|'record_sale'|'record_expense'|'adjust_stock';
+export type Line = {variant_id?:string;quantity:number;unit_cost?:number;unit_price?:number;product_id?:string;product_key?:string;variant_name?:string};
+export type NewProduct = {key:string;brand:string;model:string;category?:string;price:number;minimum?:number};
+export type Payload = {id?:string;request_id?:string;brand?:string;model?:string;category?:string;price?:number;minimum?:number;variants?:string[];items?:Line[];name?:string;freight?:number;payment?:string;card_fee?:number;delivery_charged?:number;delivery_cost?:number;note?:string;description?:string;amount?:number;date?:string;variant_id?:string;quantity?:number;reason?:string;unit_cost?:number;purchase_date?:string;other_costs?:number;new_products?:NewProduct[];price_updates?:{product_id:string;price:number}[]};
+export type Action = 'save_product'|'record_batch'|'record_purchase'|'record_sale'|'record_expense'|'adjust_stock';
 export const emptyData = ():Data => ({products:[],variants:[],batches:[],batch_items:[],sales:[],sale_items:[],expenses:[],movements:[]});
 export const brl = (value:number) => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(value);
 export const num = (value:number) => new Intl.NumberFormat('pt-BR',{maximumFractionDigits:2}).format(value);
@@ -17,6 +18,21 @@ export const day = (value:string|Date=new Date()) => new Intl.DateTimeFormat('en
 export const dateBR = (value:string) => new Intl.DateTimeFormat('pt-BR',{timeZone:'America/Sao_Paulo'}).format(new Date(value.length===10?value+'T12:00:00Z':value));
 export const round = (n:number, digits=2) => Math.round((n+Number.EPSILON)*10**digits)/10**digits;
 const id = () => crypto.randomUUID();
+/** Margem bruta desejada sobre o preço de venda (não é markup sobre o custo). */
+export const TARGET_MARGIN = 0.47;
+export const suggestedPrice = (effectiveUnitCost:number) => round(effectiveUnitCost/(1-TARGET_MARGIN));
+/** Rateio proporcional ao valor de cada item; o último item recebe o restante, fechando no centavo. */
+export function allocateCost(values:number[],amount:number):number[] {
+ const total=values.reduce((a,v)=>a+v,0);const cents=Math.round(amount*100);let allocated=0;
+ if(total<=0||cents<0)return values.map(()=>0);
+ return values.map((v,i)=>{const share=i===values.length-1?cents-allocated:Math.min(cents-allocated,Math.round(cents*v/total));allocated+=share;return share/100;});
+}
+/** Custos de cada linha da compra, com a mesma regra usada no banco. */
+export function purchaseBreakdown(items:{quantity:number;unit_cost:number}[],freight:number,other=0) {
+ const values=items.map(i=>i.quantity>0&&i.unit_cost>0?i.quantity*round(i.unit_cost):0);
+ const merchandise=values.reduce((a,v)=>a+v,0);const f=allocateCost(values,round(freight)),o=allocateCost(values,round(other));
+ return {merchandise,total:merchandise+round(freight)+round(other),lines:items.map((i,k)=>{const effective=values[k]+f[k]+o[k];const unit=i.quantity>0&&values[k]>0?round(effective/i.quantity,6):0;return {value:values[k],freight:f[k],other:o[k],effective,unit,suggested:unit?suggestedPrice(unit):0};})};
+}
 export function allocateFreight(items:Line[],freight:number):number[] {
  const total=items.reduce((a,i)=>a+i.quantity*round(i.unit_cost??0),0);
  if(total<=0 || freight<0 || !Number.isFinite(freight)) throw Error('Informe custos positivos e frete válido.');
@@ -44,6 +60,16 @@ export function applyAction(original:Data,action:Action,p:Payload,now=new Date()
   const shares=allocateFreight(p.items,p.freight!);const bid=id();
   d.batches.push({id:bid,number:d.batches.length+1,name:p.name?.trim()||'Compra',freight:round(p.freight!),merchandise:round(p.items.reduce((a,l)=>a+l.quantity*round(l.unit_cost!),0)),created_at:now,request_id:rid});
   p.items.forEach((l,i)=>{const v=variant(l.variant_id),value=round(l.quantity*round(l.unit_cost!)+shares[i]);v.quantity+=l.quantity;v.value=round(v.value+value,6);d.batch_items.push({id:id(),batch_id:bid,variant_id:v.id,quantity:l.quantity,unit_cost:round(l.unit_cost!),freight:shares[i]});move(v,'Entrada',l.quantity,value,bid,'Compra com frete rateado');});
+ } else if(action==='record_purchase') {
+  if(!p.items?.length)throw Error('Adicione pelo menos um produto à compra.');const freight=round(positive(p.freight??0,true)),other=round(positive(p.other_costs??0,true));
+  const today=day(now),date=p.purchase_date||today;if(date>today)throw Error('A data da compra não pode ser futura.');
+  const keys=new Map<string,string>();
+  for(const np of p.new_products??[]){if(!np.brand?.trim()||!np.model?.trim())throw Error('Informe marca e modelo do novo produto.');positive(np.price,true);const pid=id();keys.set(np.key,pid);d.products.push({id:pid,brand:np.brand.trim(),model:np.model.trim(),category:np.category?.trim()||'Geral',price:round(np.price),minimum:np.minimum??0});}
+  for(const u of p.price_updates??[]){const product=d.products.find(x=>x.id===u.product_id);if(!product)throw Error('Produto não encontrado.');product.price=round(positive(u.price,true));}
+  const vids=p.items.map((l,i)=>{integer(l.quantity);positive(l.unit_cost);if(l.variant_id)return variant(l.variant_id).id;const pid=l.product_id||keys.get(l.product_key??'');if(!pid||!d.products.some(x=>x.id===pid))throw Error(`Selecione ou cadastre o produto do item ${i+1}.`);const name=l.variant_name?.trim();if(!name)throw Error(`Informe o sabor/variedade do item ${i+1}.`);let v=d.variants.find(x=>x.product_id===pid&&x.name===name);if(!v){v={id:id(),product_id:pid,name,quantity:0,value:0};d.variants.push(v);}return v.id;});
+  const b=purchaseBreakdown(p.items.map(l=>({quantity:l.quantity,unit_cost:l.unit_cost!})),freight,other);const bid=id();
+  d.batches.push({id:bid,number:d.batches.length+1,name:p.name?.trim()||'Compra',freight,other_costs:other,merchandise:round(b.merchandise),purchase_date:date,created_at:now,request_id:rid});
+  p.items.forEach((l,i)=>{const v=variant(vids[i]),c=b.lines[i];v.quantity+=l.quantity;v.value=round(v.value+c.effective,6);const price=d.products.find(x=>x.id===v.product_id)!.price;d.batch_items.push({id:id(),batch_id:bid,variant_id:v.id,quantity:l.quantity,unit_cost:round(l.unit_cost!),freight:c.freight,other_costs:c.other,effective_unit_cost:c.unit,avg_cost_after:round(v.value/v.quantity,6),suggested_price:c.suggested,sale_price:price});move(v,'Entrada',l.quantity,c.effective,bid,'Compra com frete rateado');});
  } else if(action==='record_sale') {
   if(!p.items?.length)throw Error('Adicione itens.');if(!['Pix','Dinheiro','Débito','Crédito'].includes(p.payment??''))throw Error('Pagamento inválido.');
   const fee=round(positive(p.card_fee??0,true));if(fee>0&&!['Débito','Crédito'].includes(p.payment!))throw Error('Taxa disponível apenas para cartão.');

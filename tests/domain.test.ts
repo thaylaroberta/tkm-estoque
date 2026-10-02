@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {allocateFreight,applyAction,demoData,emptyData,report} from '../lib/domain';
+import {allocateFreight,applyAction,demoData,emptyData,purchaseBreakdown,report,suggestedPrice} from '../lib/domain';
 test('frete fecha em centavos mesmo com muitos itens e arredondamento',()=>{
  const items=Array.from({length:8},()=>({variant_id:'x',quantity:1,unit_cost:1}));
  const shares=allocateFreight(items,.05);assert.equal(Math.round(shares.reduce((a,b)=>a+b,0)*100),5);assert.ok(shares.every(x=>x>=0));
@@ -30,4 +30,22 @@ test('entrega cobrada 10: custo 7 gera +3; custo 15 gera -5 sem dupla despesa',(
  let r=report(d,'','');assert.equal(r.deliveryProfit,3);assert.equal(r.revenue,30);assert.equal(r.expense,7);assert.equal(r.net,18);
  const p={request_id:'delivery-2',payment:'Pix',delivery_charged:10,delivery_cost:15,items:[{variant_id:vid,quantity:1,unit_price:20}]};d=applyAction(d,'record_sale',p);d=applyAction(d,'record_sale',p);
  r=report(d,'','');assert.equal(d.expenses.length,2);assert.equal(r.deliveryProfit,-2);assert.equal(r.expense,22);assert.equal(r.net,28);assert.equal(r.rows[0].revenue,40);assert.ok(d.expenses.every(e=>e.source==='venda'&&e.sale_id));
+});
+
+test('rateio do caso real fecha em R$ 1.252 e preço sugerido usa margem de 47% sobre a venda',()=>{
+ const b=purchaseBreakdown([{quantity:6,unit_cost:66},{quantity:10,unit_cost:46},{quantity:4,unit_cost:49},{quantity:4,unit_cost:20}],120);
+ assert.equal(b.merchandise,1132);assert.equal(b.total,1252);assert.equal(Math.round(b.lines.reduce((a,l)=>a+l.freight,0)*100),12000);
+ assert.deepEqual(b.lines.map(l=>Math.round(l.unit*100)/100),[73,50.88,54.2,22.12]);
+ assert.equal(suggestedPrice(50),94.34);assert.equal(suggestedPrice(55),103.77);
+ const withOther=purchaseBreakdown([{quantity:1,unit_cost:30},{quantity:1,unit_cost:10}],10,4);assert.deepEqual(withOther.lines.map(l=>l.other),[3,1]);assert.equal(withOther.total,54);
+});
+test('compra cria produto do zero, só movimenta estoque ao finalizar e recalcula custo médio na 2ª compra',()=>{
+ let d=applyAction(emptyData(),'save_product',{brand:'TKM',model:'Cadastro solto',category:'Geral',price:10,minimum:0,variants:['Menta']});assert.equal(report(d,'','').stock,0);
+ d=applyAction(d,'record_purchase',{freight:10,new_products:[{key:'n',brand:'Marca',model:'Pod',price:100,minimum:2}],items:[{product_key:'n',variant_name:'Uva',quantity:4,unit_cost:20},{variant_id:d.variants[0].id,quantity:2,unit_cost:10}]});
+ const uva=d.variants.find(v=>v.name==='Uva')!;assert.equal(uva.quantity,4);assert.ok(Math.abs(uva.value-88)<1e-9);assert.equal(d.batch_items[0].suggested_price,suggestedPrice(22));
+ assert.equal(report(d,'','').capital,110);assert.equal(d.expenses.length,0);
+ d=applyAction(d,'record_sale',{payment:'Pix',items:[{variant_id:uva.id,quantity:1,unit_price:100}]});const cogs=d.sales[0].cogs;
+ d=applyAction(d,'record_purchase',{freight:0,items:[{product_id:uva.product_id,variant_name:'Uva',quantity:3,unit_cost:40}]});
+ const u2=d.variants.find(v=>v.id===uva.id)!;assert.equal(u2.quantity,6);assert.ok(Math.abs(u2.value/u2.quantity-(66+120)/6)<1e-9);assert.equal(d.sales[0].cogs,cogs);assert.equal(d.products.find(p=>p.model==='Pod')!.price,100);
+ assert.equal(d.movements.filter(m=>m.kind==='Entrada').length,3);
 });

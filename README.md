@@ -1,4 +1,4 @@
-# Clara — Estoque e financeiro, V1
+# TKM SMOKE — Estoque e financeiro
 
 Aplicação genérica para comércio de produtos não restritos. Demonstração com papelaria fictícia. Next.js App Router, React, TypeScript, Supabase Auth e Postgres. Interface em português, BRL e datas no fuso America/Sao_Paulo.
 
@@ -7,7 +7,9 @@ Aplicação genérica para comércio de produtos não restritos. Demonstração 
 - Login por e-mail e senha com conta compartilhada, autorizada explicitamente no banco.
 - Dashboard com faturamento, CMV/capital recuperado, lucro bruto, despesas, perdas, resultado e margem líquida, unidades vendidas, estoque, capital, venda/lucro potencial, mais vendidos e estoque baixo.
 - Produtos com marca, modelo, categoria, preço padrão, mínimo por variedade; cadastro e edição de produtos, adição de variedades.
-- Compras por lote, vários itens, custo variável e frete proporcional, com detalhamento do rateio.
+- Compra/Lote como porta de entrada: **Compra → Produtos e variedades → Estoque**. Funciona com a base zerada; produto e sabor novos são cadastrados dentro da própria compra, sem perder os dados digitados (rascunho salvo no navegador).
+- Frete e outros custos de aquisição informados uma vez por compra e rateados pelo valor de cada item; custo efetivo, custo médio após a entrada e **preço sugerido para margem de 47%** visíveis antes de finalizar. O preço de venda continua editável.
+- Ícones TKM: favicon, Apple Touch Icon (180 px) e manifest com ícones 192/512 e versão maskable para o atalho no celular.
 - Vendas com vários itens, preços editáveis, Pix/Dinheiro/Débito/Crédito e taxa repassada em reais.
 - Entrega cobrada do cliente e custo real na venda, despesa automática vinculada e resultado do transporte positivo ou negativo.
 - Despesas manuais por categoria e data; campos de origem/identificador externo preparados para integração futura.
@@ -37,6 +39,7 @@ Alternativa com npm: `npm install` e `npm run dev`. O arquivo de lock entregue �
    - `supabase/migrations/001_initial.sql`
    - `supabase/migrations/002_snapshot.sql`
    - `supabase/migrations/003_delivery.sql`
+   - `supabase/migrations/004_purchase_flow.sql`
 3. No painel Authentication, desative o cadastro público de novos usuários. Crie manualmente o usuário compartilhado com e-mail e senha, confirmado. A aplicação não possui formulário de cadastro.
 4. Copie o UUID desse usuário e autorize no SQL Editor:
 
@@ -70,6 +73,13 @@ Não use `service_role` no frontend. O acesso não depende do segredo da chave p
 Nenhuma conta Supabase/Vercel foi criada e nenhum deploy público foi executado nesta entrega. O código está pronto para essas etapas, que dependem das suas contas e configurações.
 
 ## Regras financeiras
+
+- **Compra/Lote:** cadastrar produto ou variedade não gera estoque. O estoque só muda ao **finalizar** a compra, numa única transação (`record_purchase`): cria produtos/sabores novos, rateia frete e outros custos, recalcula o custo médio, soma as quantidades, atualiza o capital, registra movimentações e salva o lote. Qualquer erro desfaz tudo. Estoque = Entradas − Vendas ± Ajustes.
+- **Data da compra:** informativa e usada nos filtros de Entradas/Lotes; não pode ser futura. A movimentação de estoque usa o momento da finalização, para que compras registradas depois não alterem o CMV de vendas já feitas.
+- **Outros custos de aquisição:** rateados como o frete, guardados separadamente por item. Nem frete nem outros custos de aquisição entram em Despesas: já estão no custo.
+- **Custo efetivo unitário:** (quantidade × custo unitário + frete rateado + outros custos rateados) ÷ quantidade. Fica gravado no item do lote, junto do custo médio após a entrada.
+- **Preço sugerido (47%):** custo efetivo unitário ÷ (1 − 0,47) = ÷ 0,53. Margem sobre o preço de venda, não acréscimo sobre o custo. É só recomendação: produto novo vem preenchido com a sugestão; produto existente mantém o preço atual, a menos que você altere o campo. O preço vale para todos os sabores do modelo; quando a compra tem sabores com custos diferentes, a sugestão do produto é a maior delas. O preço praticado em cada venda fica gravado na venda e não muda depois.
+- **Ajuste manual:** reservado para perda, avaria, divergência de inventário e correções. Reposição normal entra por Nova compra.
 
 - **Frete:** cada linha recebe `frete × valor da mercadoria da linha / total da mercadoria`. Rateio em centavos, com o restante no último item e limite ao saldo de frete. A soma das parcelas é exata. O detalhamento fica preservado no lote.
 - **Custo médio por variedade:** valor contábil atual ÷ quantidade atual. Novas compras somam quantidade e custo com frete. O banco mantém valor de estoque/CMV em decimal com seis casas; a tela exibe duas.
@@ -125,5 +135,10 @@ Os testes usam Postgres embarcado (PGlite) para executar as migrations e as fun�
 Referências: [Next.js — instalação](https://nextjs.org/docs/app/getting-started/installation), [Supabase — RLS](https://supabase.com/docs/guides/database/postgres/row-level-security), [Supabase — funções RPC](https://supabase.com/docs/reference/javascript/rpc).
 
 ### Atualizar uma instalação anterior
+
+**Para a versão com Compra/Lote (004):** execute `004_purchase_flow.sql` **antes** de publicar o novo frontend. A migration só acrescenta colunas e a função `record_purchase`; as funções anteriores continuam, então o site atual segue funcionando até a publicação. Lotes anteriores recebem data de compra igual à data de lançamento.
+
+**Limpeza dos dados de teste:** `supabase/maintenance/limpar_base_teste.sql` (não é migration). Rode a PARTE A para conferir as contagens, depois a PARTE B. Remove produtos, variedades, lotes, vendas, despesas e movimentações na ordem das chaves estrangeiras, reinicia a numeração (próxima compra = Lote 1) e preserva usuários e autorização. Não tem volta: faça um backup antes, se o seu plano permitir.
+
 
 Se as migrations 001 e 002 já foram aplicadas, execute somente `003_delivery.sql` e publique a versão atualizada do frontend. Vendas anteriores recebem cobrança/custo de entrega zero. Nenhuma despesa anterior é reclassificada automaticamente. O custo da entrega deve ser informado ao registrar a venda; a V1 ainda não tem edição posterior de vendas.
