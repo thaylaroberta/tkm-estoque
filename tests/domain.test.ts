@@ -105,3 +105,10 @@ test('lista do WhatsApp: só sabores com estoque, ordem por preço, emojis, desc
  assert.ok(whatsappList(d,{onlyInStock:false}).includes('Peach+'));assert.ok(whatsappList(d,{showQuantity:true}).includes('Abacaxi gelado (2 un.)'));
  assert.equal(titleCase('SOUR STRAWBERRY DRAGONFRUIT'),'Sour Strawberry Dragonfruit');
 });
+test('sugestão automática de emoji e descrição para sabores novos',async()=>{
+ const {suggestFlavor}=await import('../lib/domain');
+ const cases:[string,string,string][]=[['ORANGE SODA ICE','🍊🥤','Refrigerante de laranja gelado'],['SOUR STRAWBERRY DRAGONFRUIT','🍓🐉','Morango azedo com pitaya'],['BLUE RAZZ ICE','🫐','Framboesa azul gelada'],
+  ['TOASTED BANANA','🍌','Banana tostada'],['NANA COCONUT','🍌🥥','Banana com coco'],['STRAWBERRY MANGO ICE','🍓🥭','Morango com manga gelado'],['PEACH MANGO WATERMELON ICE','🍑🥭🍉','Pêssego, manga e melancia gelados'],['GRAPEFRUIT','🍊','Toranja']];
+ for(const [n,e,d] of cases)assert.deepEqual(suggestFlavor(n),{emoji:e,description:d},n);
+ assert.equal(suggestFlavor('SUMMER SPLASH'),null);
+});

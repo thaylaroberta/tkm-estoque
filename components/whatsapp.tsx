@@ -1,7 +1,7 @@
 'use client';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {Check,Copy,MessageCircle,X} from 'lucide-react';
-import {Action,Data,Payload,brl,flavorLabel,listPrice,titleCase,whatsappList} from '@/lib/domain';
+import {Action,Data,Payload,brl,flavorLabel,listPrice,suggestFlavor,titleCase,whatsappList} from '@/lib/domain';
 
 type ProductEdit={list_name:string;list_emoji:string;list_price:string};
 type VariantEdit={list_emoji:string;list_label:string;list_description:string};
@@ -12,8 +12,11 @@ export function WhatsappList({data,onSave,onClose,busy,error}:{data:Data;onSave:
  useEffect(()=>{dialog.current?.showModal();return()=>dialog.current?.close();},[]);
  const [header,setHeader]=useState(data.settings?.list_header??'');const [footer,setFooter]=useState(data.settings?.list_footer??'');
  const [products,setProducts]=useState<Record<string,ProductEdit>>(()=>Object.fromEntries(data.products.map(p=>[p.id,{list_name:p.list_name??'',list_emoji:p.list_emoji??'',list_price:p.list_price==null?'':String(p.list_price)}])));
- const [variants,setVariants]=useState<Record<string,VariantEdit>>(()=>Object.fromEntries(data.variants.map(v=>[v.id,{list_emoji:v.list_emoji??'',list_label:v.list_label??'',list_description:v.list_description??''}])));
- const [onlyInStock,setOnlyInStock]=useState(true);const [showQuantity,setShowQuantity]=useState(false);const [copied,setCopied]=useState(false);const [dirty,setDirty]=useState(false);
+ // Sabores sem emoji/descrição recebem uma sugestão automática pelo nome (você confere e salva).
+ const [suggested]=useState<Set<string>>(()=>new Set(data.variants.filter(v=>!v.list_emoji&&!v.list_description&&suggestFlavor(v.name)).map(v=>v.id)));
+ const [variants,setVariants]=useState<Record<string,VariantEdit>>(()=>Object.fromEntries(data.variants.map(v=>{const sug=suggested.has(v.id)?suggestFlavor(v.name):null;
+  return [v.id,{list_emoji:v.list_emoji??sug?.emoji??'',list_label:v.list_label??'',list_description:v.list_description??sug?.description??''}];})));
+ const [onlyInStock,setOnlyInStock]=useState(true);const [showQuantity,setShowQuantity]=useState(false);const [copied,setCopied]=useState(false);const [dirty,setDirty]=useState(()=>data.variants.some(v=>v.quantity>0&&suggested.has(v.id)));
  const preview=useMemo(()=>({...data,
   products:data.products.map(p=>{const e=products[p.id];return {...p,list_name:e.list_name||null,list_emoji:e.list_emoji||null,list_price:e.list_price===''?null:Number(e.list_price)};}),
   variants:data.variants.map(v=>{const e=variants[v.id];return {...v,list_emoji:e.list_emoji||null,list_label:e.list_label||null,list_description:e.list_description||null};})}),[data,products,variants]);
@@ -21,6 +24,7 @@ export function WhatsappList({data,onSave,onClose,busy,error}:{data:Data;onSave:
  const editP=(id:string,k:keyof ProductEdit,v:string)=>{setProducts(s=>({...s,[id]:{...s[id],[k]:v}}));setDirty(true);};
  const editV=(id:string,k:keyof VariantEdit,v:string)=>{setVariants(s=>({...s,[id]:{...s[id],[k]:v}}));setDirty(true);};
  const missing=preview.variants.filter(v=>v.quantity>0&&(!v.list_emoji||!v.list_description)).length;
+ const suggestedInStock=data.variants.filter(v=>v.quantity>0&&suggested.has(v.id)).length;
  async function copy(){try{await navigator.clipboard.writeText(text);}catch{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();}setCopied(true);setTimeout(()=>setCopied(false),2500);}
  function save(){onSave('save_list_settings',{header,footer,
   list_products:Object.entries(products).map(([id,e])=>({id,list_name:e.list_name,list_emoji:e.list_emoji,list_price:e.list_price===''?null:Number(e.list_price)})),
@@ -37,10 +41,10 @@ export function WhatsappList({data,onSave,onClose,busy,error}:{data:Data;onSave:
     <p className="hint">Copie e cole no grupo. "Enviar no WhatsApp" abre o app para você escolher o grupo.</p>
    </section>
    <section className="list-editor">
-    <h3>Personalizar {missing>0&&<span className="badge warning">{missing} sabor{missing>1?'es':''} em estoque sem emoji ou descrição</span>}</h3>
+    <h3>Personalizar {missing>0&&<span className="badge warning">{missing} sabor{missing>1?'es':''} em estoque sem emoji ou descrição</span>}{suggestedInStock>0&&<span className="badge neutral">{suggestedInStock} sugest{suggestedInStock>1?'ões automáticas':'ão automática'} · confira e salve</span>}</h3>
     <label>Cabeçalho<textarea rows={2} value={header} onChange={e=>{setHeader(e.target.value);setDirty(true);}}/></label>
     {ordered.map(p=>{const e=products[p.id];const flavors=data.variants.filter(v=>v.product_id===p.id).sort((a,b)=>(b.quantity>0?1:0)-(a.quantity>0?1:0)||flavorLabel(a).localeCompare(flavorLabel(b),'pt-BR'));
-     return <details className="list-product" key={p.id} open={flavors.some(v=>v.quantity>0&&(!variants[v.id].list_emoji||!variants[v.id].list_description))}>
+     return <details className="list-product" key={p.id} open={flavors.some(v=>v.quantity>0&&(suggested.has(v.id)||!variants[v.id].list_emoji||!variants[v.id].list_description))}>
       <summary><span>{e.list_emoji} <strong>{e.list_name||`${p.brand} ${p.model}`}</strong></span><small>{brl(listPrice({...p,list_price:e.list_price===''?null:Number(e.list_price)}))} · {flavors.filter(v=>v.quantity>0).length} sabores com estoque</small></summary>
       <div className="list-product-fields"><label>Emoji<input value={e.list_emoji} onChange={x=>editP(p.id,'list_emoji',x.target.value)} placeholder="Ex.: 🔥"/></label>
        <label>Nome na lista<input value={e.list_name} onChange={x=>editP(p.id,'list_name',x.target.value)} placeholder={`${p.brand} ${p.model}`}/></label>
@@ -49,7 +53,7 @@ export function WhatsappList({data,onSave,onClose,busy,error}:{data:Data;onSave:
        <input aria-label={`Emoji de ${v.name}`} className="emoji-input" value={ve.list_emoji} onChange={x=>editV(v.id,'list_emoji',x.target.value)} placeholder="emoji"/>
        <input aria-label={`Nome de ${v.name} na lista`} value={ve.list_label} onChange={x=>editV(v.id,'list_label',x.target.value)} placeholder={titleCase(v.name)}/>
        <input aria-label={`Descrição de ${v.name}`} value={ve.list_description} onChange={x=>editV(v.id,'list_description',x.target.value)} placeholder="Descrição (ex.: Uva gelada)"/>
-       <small>{v.quantity>0?`${v.quantity} un.`:'esgotado'}</small></div>;})}</div>
+       <small>{suggested.has(v.id)&&<span className="suggest-tag">sugestão</span>}{v.quantity>0?`${v.quantity} un.`:'esgotado'}</small></div>;})}</div>
      </details>;})}
     <label>Rodapé (informações fixas)<textarea rows={8} value={footer} onChange={e=>{setFooter(e.target.value);setDirty(true);}}/></label>
    </section>

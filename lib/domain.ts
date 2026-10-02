@@ -44,6 +44,49 @@ export function saleBlockers(d:Data,saleId:string,vids:string[]):string[] {
  const sale=d.sales.find(x=>x.id===saleId);if(!sale)return [];const set=new Set(vids);
  return [...new Set(d.movements.filter(m=>set.has(m.variant_id)&&(m.kind==='Entrada'||m.kind==='Ajuste')&&m.created_at>sale.created_at).map(m=>{const v=d.variants.find(x=>x.id===m.variant_id),p=d.products.find(x=>x.id===v?.product_id);return `${p?.model??''} · ${v?.name??''} (${m.kind.toLowerCase()})`;}))];
 }
+type FlavorWord={emoji:string;pt:string;g:'m'|'f';plural?:boolean};
+/** Dicionário de sabores (inglês → emoji + português). Expressões compostas vêm antes das palavras soltas. */
+const FLAVOR_PHRASES:[string,FlavorWord][]=[
+ ['blue razz',{emoji:'🫐',pt:'Framboesa azul',g:'f'}],['blue raspberry',{emoji:'🫐',pt:'Framboesa azul',g:'f'}],['dragon fruit',{emoji:'🐉',pt:'Pitaya',g:'f'}],
+ ['passion fruit',{emoji:'💛',pt:'Maracujá',g:'m'}],['cotton candy',{emoji:'🍭',pt:'Algodão-doce',g:'m'}],['bubble gum',{emoji:'🍬',pt:'Chiclete',g:'m'}],
+ ['energy drink',{emoji:'⚡',pt:'Energético',g:'m'}],['red bull',{emoji:'⚡',pt:'Energético',g:'m'}],['mixed berries',{emoji:'🫐',pt:'Frutas vermelhas',g:'f',plural:true}],
+ ['tutti frutti',{emoji:'🍬',pt:'Tutti-frutti',g:'m'}]];
+const FLAVOR_WORDS:Record<string,FlavorWord>={
+ grape:{emoji:'🍇',pt:'Uva',g:'f'},grapes:{emoji:'🍇',pt:'Uva',g:'f'},grapefruit:{emoji:'🍊',pt:'Toranja',g:'f'},mango:{emoji:'🥭',pt:'Manga',g:'f'},
+ strawberry:{emoji:'🍓',pt:'Morango',g:'m'},strawnana:{emoji:'🍓🍌',pt:'Morango com banana',g:'m'},watermelon:{emoji:'🍉',pt:'Melancia',g:'f'},melon:{emoji:'🍈',pt:'Melão',g:'m'},
+ bluemelon:{emoji:'🍉',pt:'Melancia azul',g:'f'},pineapple:{emoji:'🍍',pt:'Abacaxi',g:'m'},lemon:{emoji:'🍋',pt:'Limão',g:'m'},lime:{emoji:'🍋',pt:'Limão',g:'m'},
+ lemonade:{emoji:'🍋',pt:'Limonada',g:'f'},peach:{emoji:'🍑',pt:'Pêssego',g:'m'},cherry:{emoji:'🍒',pt:'Cereja',g:'f'},blueberry:{emoji:'🫐',pt:'Mirtilo',g:'m'},
+ raspberry:{emoji:'🫐',pt:'Framboesa',g:'f'},blackberry:{emoji:'🫐',pt:'Amora',g:'f'},berry:{emoji:'🫐',pt:'Frutas vermelhas',g:'f',plural:true},berries:{emoji:'🫐',pt:'Frutas vermelhas',g:'f',plural:true},
+ banana:{emoji:'🍌',pt:'Banana',g:'f'},nana:{emoji:'🍌',pt:'Banana',g:'f'},coconut:{emoji:'🥥',pt:'Coco',g:'m'},apple:{emoji:'🍏',pt:'Maçã',g:'f'},kiwi:{emoji:'🥝',pt:'Kiwi',g:'m'},
+ orange:{emoji:'🍊',pt:'Laranja',g:'f'},lychee:{emoji:'🍒',pt:'Lichia',g:'f'},litchi:{emoji:'🍒',pt:'Lichia',g:'f'},guava:{emoji:'🍐',pt:'Goiaba',g:'f'},pear:{emoji:'🍐',pt:'Pera',g:'f'},
+ dragonfruit:{emoji:'🐉',pt:'Pitaya',g:'f'},pitaya:{emoji:'🐉',pt:'Pitaya',g:'f'},passionfruit:{emoji:'💛',pt:'Maracujá',g:'m'},papaya:{emoji:'🧡',pt:'Mamão',g:'m'},
+ mint:{emoji:'🌿',pt:'Menta',g:'f'},menthol:{emoji:'🌿',pt:'Menta',g:'f'},spearmint:{emoji:'🌿',pt:'Hortelã',g:'f'},vanilla:{emoji:'🍦',pt:'Baunilha',g:'f'},coffee:{emoji:'☕',pt:'Café',g:'m'},
+ cola:{emoji:'🥤',pt:'Cola',g:'f'},soda:{emoji:'🥤',pt:'Refrigerante',g:'m'},tobacco:{emoji:'🍂',pt:'Tabaco',g:'m'},bubblegum:{emoji:'🍬',pt:'Chiclete',g:'m'},
+ gum:{emoji:'🍬',pt:'Chiclete',g:'m'},candy:{emoji:'🍬',pt:'Bala',g:'f'},punch:{emoji:'🍹',pt:'Ponche',g:'m'},tropical:{emoji:'🌴',pt:'Mix tropical',g:'m'},
+ cranberry:{emoji:'🍒',pt:'Cranberry',g:'m'},plum:{emoji:'🟣',pt:'Ameixa',g:'f'},apricot:{emoji:'🍑',pt:'Damasco',g:'m'},fig:{emoji:'🟤',pt:'Figo',g:'m'},
+ caramel:{emoji:'🍮',pt:'Caramelo',g:'m'},chocolate:{emoji:'🍫',pt:'Chocolate',g:'m'},honeydew:{emoji:'🍈',pt:'Melão',g:'m'},cantaloupe:{emoji:'🍈',pt:'Melão',g:'m'},hawaii:{emoji:'🌺',pt:'Mix tropical',g:'m'},hawaiian:{emoji:'🌺',pt:'Mix tropical',g:'m'},lush:{emoji:'🍉',pt:'Melancia',g:'f'}};
+const ICE_WORDS=new Set(['ice','iced','cool','cold','frozen','freeze','chill','gelado']);const ADJECTIVES:Record<string,string>={sour:'azed',toasted:'tostad',roasted:'tostad',sweet:'doce'};
+/** Sugere emoji e descrição para um sabor novo a partir do nome. Retorna null quando não reconhece nenhum sabor. */
+export function suggestFlavor(name:string):{emoji:string;description:string}|null {
+ let text=` ${name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,' ').trim()} `;
+ const found:{word:FlavorWord;at:number}[]=[];
+ for(const [phrase,word] of FLAVOR_PHRASES){const at=text.indexOf(` ${phrase} `);if(at>=0){found.push({word,at});text=text.replace(` ${phrase} `,' '+'_'.repeat(phrase.length)+' ');}}
+ const tokens=text.trim().split(/\s+/);let pos=0;const positions=tokens.map(t=>{const at=text.indexOf(t,pos);pos=at+t.length;return at;});
+ tokens.forEach((t,i)=>{const w=FLAVOR_WORDS[t];if(w)found.push({word:w,at:positions[i]});});
+ if(!found.length)return null;
+ found.sort((a,b)=>a.at-b.at);let unique=found.filter((f,i)=>found.findIndex(o=>o.word.pt===f.word.pt)===i);
+ // "Orange soda" → "Refrigerante de laranja"
+ const sodaIdx=unique.findIndex(f=>f.word.pt==='Refrigerante');
+ if(sodaIdx>=0&&unique.length>1){const rest=unique.filter((_,i)=>i!==sodaIdx);unique=[{word:{emoji:rest[0].word.emoji+'🥤',pt:`Refrigerante de ${rest.map(f=>f.word.pt.toLowerCase()).join(' e ')}`,g:'m'},at:0}];}
+ const ice=tokens.some(t=>ICE_WORDS.has(t));const adjectives=tokens.map(t=>ADJECTIVES[t]).filter(Boolean);
+ const first=unique[0].word;const adj=(base:string,w:FlavorWord,many:boolean)=>{const plural=many||!!w.plural;return base+(w.g==='f'?(plural?'as':'a'):(plural?'os':'o'));};
+ const names=unique.map((f,i)=>i===0?f.word.pt:f.word.pt.toLowerCase());
+ for(const a of adjectives)names[0]=`${names[0]} ${a==='doce'?'doce':adj(a,first,false)}`;
+ let description=names.length===1?names[0]:names.length===2?`${names[0]} com ${names[1]}`:`${names.slice(0,-1).join(', ')} e ${names.at(-1)}`;
+ if(ice){const list=unique.length>2;const anyM=unique.some(f=>f.word.g==='m');description+=` ${list?(anyM?'gelados':'geladas'):adj('gelad',first,false)}`;}
+ const emoji=[...new Set(unique.flatMap(f=>Array.from(f.word.emoji.matchAll(/\p{Extended_Pictographic}️?/gu)).map(m=>m[0])))].slice(0,4).join('');
+ return {emoji,description};
+}
 export const LIST_SEPARATOR='━━━━━━━━━━━━━━━━━━';
 export const titleCase=(s:string)=>s.toLowerCase().replace(/(^|[\s\-/(])([\p{L}\d])/gu,(_,a,b)=>a+b.toUpperCase());
 export const listPrice=(p:Product)=>p.list_price??p.price;

@@ -442,3 +442,4 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
   .list-flavor small { grid-column: 1 / -1; text-align: left; }
   .list-actions .button { flex: 1; justify-content: center; }
 }
+.suggest-tag { display: block; color: var(--tkm-purple); font-weight: 600; font-size: 9px; text-transform: uppercase; letter-spacing: .4px; }
