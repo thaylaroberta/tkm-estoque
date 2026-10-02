@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
 const UID='11111111-1111-4111-8111-111111111111';
-async function database(){const db=new PGlite();await db.exec(`create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth to authenticated,anon; grant execute on function auth.uid() to authenticated,anon; insert into auth.users values('${UID}');`);
- for(const file of ['001_initial.sql','002_snapshot.sql','003_delivery.sql','004_purchase_flow.sql'])await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));
+const ALL=['001_initial.sql','002_snapshot.sql','003_delivery.sql','004_purchase_flow.sql','005_edit_purchase.sql'];
+async function migrate(db:PGlite,files:string[]){for(const file of files)await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));}
+async function database(files=ALL){const db=new PGlite();await db.exec(`create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth to authenticated,anon; grant execute on function auth.uid() to authenticated,anon; insert into auth.users values('${UID}');`);
+ await migrate(db,files);
  await db.exec(`insert into public.app_users values('${UID}');set request.jwt.claim.sub='${UID}';`);return db;}
 async function rpc(db:PGlite,name:string,p:object){const result=await db.query<{id:string}>(`select public.${name}($1::jsonb) as id`,[JSON.stringify(p)]);return result.rows[0].id;}
 const rid=()=>crypto.randomUUID();
@@ -81,4 +83,48 @@ test('script de limpeza zera a base na ordem correta e reinicia a numeração de
  const users=await db.query<{n:string}>('select count(*)::text as n from app_users');assert.equal(users.rows[0].n,'1');
  await db.exec('set role authenticated');const bid=await rpc(db,'record_purchase',{request_id:rid(),freight:0,new_products:[{key:'k',brand:'B',model:'M',price:10}],items:[{product_key:'k',variant_name:'S',quantity:1,unit_cost:5}]});
  const n=await db.query<{number:string}>('select number::text from batches where id=$1',[bid]);assert.equal(n.rows[0].number,'1');
+ }finally{await db.close();}});
+
+test('005 junta produtos duplicados do lote sem mudar estoque, custo ou lote; e impede novos duplicados',async()=>{const db=await database(ALL.slice(0,4));try{
+ await db.exec('set role authenticated');
+ const np=(key:string,brand:string,model:string,price:number)=>({key,brand,model,category:'40000',price,minimum:2});
+ await rpc(db,'record_purchase',{request_id:rid(),freight:120,new_products:[np('a','ELFBAR','ICE KING 40K',133.11),np('b','ELFBAR','ICE KING 40K',133.10),np('c','LOST MARY','MT20000',92.15),np('d','Lost Mary ',' MT20000',92.16),{...np('e','LOST MARY','MT20000',92.15),minimum:7}],
+  items:[{product_key:'a',variant_name:'GRAPE ICE',quantity:1,unit_cost:65},{product_key:'b',variant_name:'CHERRY FUSE',quantity:1,unit_cost:65},{product_key:'c',variant_name:'BERRY BURST',quantity:4,unit_cost:45},{product_key:'d',variant_name:'HAWAII JUICE',quantity:1,unit_cost:45},{product_key:'e',variant_name:'NANA COCONUT',quantity:1,unit_cost:45}]});
+ const before=(await db.query<{q:string;v:string;items:string;mov:string}>('select (select sum(quantity)::text from variants) q,(select sum(value)::text from variants) v,(select count(*)::text from batch_items) items,(select count(*)::text from movements) mov')).rows[0];
+ await db.exec('reset role');await migrate(db,['005_edit_purchase.sql']);await db.exec('set role authenticated');
+ const products=(await db.query<{model:string;price:string;n:string}>('select p.model,p.price::text,(select count(*)::text from variants v where v.product_id=p.id) n from products p order by model')).rows;
+ assert.deepEqual(products.map(p=>[p.model,+p.price,+p.n]),[['ICE KING 40K',133.11,2],['MT20000',92.16,3]]);
+ assert.equal((await db.query<{minimum:number}>("select minimum from products where model='MT20000'")).rows[0].minimum,2);
+ const after=(await db.query<{q:string;v:string;items:string;mov:string}>('select (select sum(quantity)::text from variants) q,(select sum(value)::text from variants) v,(select count(*)::text from batch_items) items,(select count(*)::text from movements) mov')).rows[0];
+ assert.deepEqual(after,before);
+ // nova compra digitando o mesmo produto com outra grafia reaproveita o cadastro
+ await rpc(db,'record_purchase',{request_id:rid(),freight:0,new_products:[np('x','elfbar','ice  king 40k',140)],items:[{product_key:'x',variant_name:'MANGO MAGIC',quantity:1,unit_cost:65},{product_key:'x',variant_name:'grape ice',quantity:1,unit_cost:65}]});
+ const ice=(await db.query<{n:string;price:string;grape:number}>(`select (select count(*)::text from variants v join products p on p.id=v.product_id where p.model='ICE KING 40K') n,(select price::text from products where model='ICE KING 40K') price,(select quantity from variants where name='GRAPE ICE') grape`)).rows[0];
+ assert.equal(+ice.n,3);assert.equal(+ice.price,140);assert.equal(ice.grape,2);assert.equal((await db.query<{n:string}>('select count(*)::text n from products')).rows[0].n,'2');
+ await assert.rejects(rpc(db,'save_product',{brand:'ELFBAR',model:'Ice King 40k',category:'x',price:1,minimum:0,variants:['Uva']}),/Já existe/);
+ }finally{await db.close();}});
+test('editar compra: desfaz e relança com custo médio correto; trava após venda; renomear e excluir',async()=>{const db=await database();try{
+ await db.exec('set role authenticated');
+ const bid=await rpc(db,'record_purchase',{request_id:rid(),name:'Lote 1',purchase_date:'2026-09-26',freight:10,new_products:[{key:'k',brand:'WAKA',model:'FASTA 46K',price:100,minimum:1}],items:[{product_key:'k',variant_name:'WATERMELON',quantity:2,unit_cost:49},{product_key:'k',variant_name:'PEACH',quantity:1,unit_cost:49}]});
+ const vs=(await db.query<{id:string;name:string;product_id:string}>('select id,name,product_id from variants order by name')).rows;const [peach,water]=vs;
+ const edit={request_id:rid(),batch_id:bid,name:'Lote 1 corrigido',purchase_date:'2026-09-25',freight:20,items:[{variant_id:water.id,quantity:3,unit_cost:50},{product_id:water.product_id,variant_name:'BLUEMELON',quantity:1,unit_cost:50}]};
+ assert.equal(await rpc(db,'update_purchase',edit),bid);assert.equal(await rpc(db,'update_purchase',edit),bid);
+ const st=(await db.query<{name:string;quantity:number;value:string}>('select name,quantity,value::text from variants order by name')).rows;
+ assert.deepEqual(st.map(v=>[v.name,v.quantity,+v.value]),[['BLUEMELON',1,55],['PEACH',0,0],['WATERMELON',3,165]]);
+ const b=(await db.query<{number:string;name:string;d:string;f:string;m:string}>('select number::text,name,purchase_date::text d,freight::text f,merchandise::text m from batches')).rows;assert.deepEqual(b.map(x=>[x.number,x.name,x.d,+x.f,+x.m]),[['1','Lote 1 corrigido','2026-09-25',20,200]]);
+ assert.equal((await db.query<{n:string}>("select count(*)::text n from movements where kind='Entrada'")).rows[0].n,'2');
+ assert.equal((await db.query<{n:string}>("select count(*)::text n from batch_revisions where action='edit'")).rows[0].n,'1');
+ // venda depois da compra: edição completa e exclusão travadas; nome e data continuam editáveis
+ await rpc(db,'record_sale',{request_id:rid(),payment:'Pix',items:[{variant_id:water.id,quantity:1,unit_price:100}]});
+ await assert.rejects(rpc(db,'update_purchase',{...edit,request_id:rid()}),/movimentações depois/);
+ await assert.rejects(rpc(db,'delete_purchase',{request_id:rid(),batch_id:bid}),/movimentações depois/);
+ await rpc(db,'rename_purchase',{request_id:rid(),batch_id:bid,name:'Fornecedor X',purchase_date:'2026-09-24'});
+ assert.equal((await db.query<{name:string}>('select name from batches')).rows[0].name,'Fornecedor X');
+ // excluir compra sem movimentação posterior
+ const b2=await rpc(db,'record_purchase',{request_id:rid(),freight:0,items:[{variant_id:peach.id,quantity:4,unit_cost:30}]});
+ await rpc(db,'delete_purchase',{request_id:rid(),batch_id:b2});
+ const p=(await db.query<{quantity:number;value:string;n:string}>('select quantity,value::text,(select count(*)::text from batches) n from variants where id=$1',[peach.id])).rows[0];assert.equal(p.quantity,0);assert.equal(+p.value,0);assert.equal(p.n,'1');
+ // usuário não autorizado
+ await db.exec("set request.jwt.claim.sub='22222222-2222-4222-8222-222222222222'");await assert.rejects(rpc(db,'delete_purchase',{request_id:rid(),batch_id:bid}),/autorizado/);
+ await db.exec('reset role;set role anon');await assert.rejects(rpc(db,'update_purchase',edit),/permission denied/);
  }finally{await db.close();}});
