@@ -443,3 +443,8 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
   .list-actions .button { flex: 1; justify-content: center; }
 }
 .suggest-tag { display: block; color: var(--tkm-purple); font-weight: 600; font-size: 9px; text-transform: uppercase; letter-spacing: .4px; }
+
+/* ── Caixa ─────────────────────────────────────────────────────────────── */
+.cash-hint { margin: -6px 0 14px; }
+.cash-note { margin: -8px 0 18px; }
+.row-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; white-space: nowrap; }

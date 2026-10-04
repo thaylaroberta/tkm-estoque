@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
 const UID='11111111-1111-4111-8111-111111111111';
-const ALL=['001_initial.sql','002_snapshot.sql','003_delivery.sql','004_purchase_flow.sql','005_edit_purchase.sql','006_sale_discount.sql','007_edit_sale.sql','008_adjustment_type.sql','009_whatsapp_list.sql'];
+const ALL=['001_initial.sql','002_snapshot.sql','003_delivery.sql','004_purchase_flow.sql','005_edit_purchase.sql','006_sale_discount.sql','007_edit_sale.sql','008_adjustment_type.sql','009_whatsapp_list.sql','010_cash.sql'];
 async function migrate(db:PGlite,files:string[]){for(const file of files)await db.exec(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8'));}
 async function database(files=ALL){const db=new PGlite();await db.exec(`create role anon; create role authenticated; create schema auth; create table auth.users(id uuid primary key); create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$; grant usage on schema auth to authenticated,anon; grant execute on function auth.uid() to authenticated,anon; insert into auth.users values('${UID}');`);
  await migrate(db,files);
@@ -212,4 +212,23 @@ test('009: lista pré-preenchida pelo nome do sabor, salva configuração e apar
  assert.equal((await db.query<{x:string}>('select list_price::text x from products')).rows[0].x,'85.00');
  assert.deepEqual((await db.query<{e:string;d:string}>('select list_emoji e,list_description d from variants where id=$1',[vid])).rows[0],{e:'🍋',d:'Limão'});
  await db.exec("set request.jwt.claim.sub='22222222-2222-4222-8222-222222222222'");await assert.rejects(db.query('select public.save_list_settings($1::jsonb)',['{}']),/autorizado/);
+ }finally{await db.close();}});
+
+test('010: caixa com empréstimo, pagamento com juros e despesa editável/excluível sem apagar histórico',async()=>{const db=await database();try{
+ await db.exec('set role authenticated');const q=(sql:string,p:unknown[]=[])=>db.query(sql,p);
+ const cash=async(p:object)=>(await db.query<{id:string}>('select public.record_cash_entry($1::jsonb) id',[JSON.stringify({request_id:rid(),...p})])).rows[0].id;
+ const loan=await cash({kind:'emprestimo',amount:553,date:'2026-10-03',description:'Empréstimo'});
+ await cash({kind:'pagamento_emprestimo',amount:115,date:'2026-10-03',loan_id:loan});
+ const pay=await cash({kind:'pagamento_emprestimo',amount:100,interest:10,date:'2026-10-03',loan_id:loan});
+ assert.equal((await q("select amount::text a from expenses where source='caixa'")).rows.length,1);
+ await assert.rejects(cash({kind:'pagamento_emprestimo',amount:500,loan_id:loan}),/maior que o saldo/);
+ await assert.rejects(q('select public.cancel_cash_entry($1::jsonb)',[JSON.stringify({id:loan})]),/pagamentos registrados/);
+ await q('select public.cancel_cash_entry($1::jsonb)',[JSON.stringify({id:pay})]);
+ const st=(await q('select public.get_state() s')).rows[0] as {s:{cash:{id:string}[];expenses:unknown[]}};assert.equal(st.s.cash.length,2);assert.equal(st.s.expenses.length,0);
+ const eid=await rpc(db,'record_expense',{request_id:rid(),category:'Outros',description:'COMPRA DE MERCADORIA + ESTACIONAMENTO',amount:1703,date:'2026-10-03'});
+ await q('select public.update_expense($1::jsonb)',[JSON.stringify({id:eid,category:'Outros',description:'Estacionamento',amount:50,date:'2026-10-03'})]);
+ assert.equal(((await q('select amount::text a from expenses where id=$1',[eid])).rows[0] as {a:string}).a,'50.00');
+ await q('select public.cancel_expense($1::jsonb)',[JSON.stringify({id:eid})]);
+ assert.equal(((await q('select count(*)::text n from expenses where canceled_at is not null')).rows[0] as {n:string}).n,'2');
+ await db.exec("set request.jwt.claim.sub='22222222-2222-4222-8222-222222222222'");await assert.rejects(cash({kind:'aporte',amount:1}),/autorizado/);
  }finally{await db.close();}});

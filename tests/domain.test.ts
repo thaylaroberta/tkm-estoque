@@ -112,3 +112,23 @@ test('sugestão automática de emoji e descrição para sabores novos',async()=>
  for(const [n,e,d] of cases)assert.deepEqual(suggestFlavor(n),{emoji:e,description:d},n);
  assert.equal(suggestFlavor('MAGIC CLOUD'),null);
 });
+test('caixa: saldo inicial, compra, empréstimo e pagamento; empréstimo não é receita e principal pago não é despesa',async()=>{
+ const {cashFlow,loanOpen}=await import('../lib/domain');
+ let d=applyAction(emptyData(),'record_cash_entry',{kind:'saldo_inicial',amount:1220,date:'2026-10-03',description:'Vendas do dia 02'},'2026-10-03T20:00:00.000Z');
+ d=applyAction(d,'record_purchase',{purchase_date:'2026-10-03',freight:0,new_products:[{key:'k',brand:'ELFBAR',model:'ICE',price:133,minimum:0}],items:[{product_key:'k',variant_name:'GRAPE',quantity:10,unit_cost:177.3}]},'2026-10-03T21:00:00.000Z');
+ d=applyAction(d,'record_cash_entry',{kind:'emprestimo',amount:553,date:'2026-10-03',description:'Empréstimo para a compra'},'2026-10-03T21:01:00.000Z');
+ const loan=d.cash!.find(c=>c.kind==='emprestimo')!;
+ d=applyAction(d,'record_expense',{category:'Outros',description:'Estacionamento',amount:50,date:'2026-10-03'},'2026-10-03T21:02:00.000Z');
+ d=applyAction(d,'record_sale',{payment:'Pix',items:[{variant_id:d.variants[0].id,quantity:1,unit_price:115}]},'2026-10-03T22:00:00.000Z');
+ d=applyAction(d,'record_cash_entry',{kind:'pagamento_emprestimo',amount:115,date:'2026-10-03',loan_id:loan.id},'2026-10-03T22:30:00.000Z');
+ let c=cashFlow(d);assert.equal(c.balance,1220-1773+553-50+115-115);assert.equal(c.debt,438);assert.equal(loanOpen(d,loan.id),438);
+ assert.equal(report(d,'','').revenue,115);assert.equal(report(d,'','').operatingExpense,50);
+ // pagamento com juros: R$ 100 pagos, R$ 10 de juros → dívida cai 90, juros vira despesa e não sai duas vezes do caixa
+ d=applyAction(d,'record_cash_entry',{kind:'pagamento_emprestimo',amount:100,interest:10,date:'2026-10-03',loan_id:loan.id},'2026-10-03T23:00:00.000Z');
+ c=cashFlow(d);assert.equal(c.debt,348);assert.equal(c.balance,-150);assert.equal(report(d,'','').operatingExpense,60);
+ assert.throws(()=>applyAction(d,'record_cash_entry',{kind:'pagamento_emprestimo',amount:400,loan_id:loan.id,date:'2026-10-03'}),/maior que o saldo em aberto/);
+ assert.throws(()=>applyAction(d,'cancel_cash_entry',{id:loan.id}),/pagamentos registrados/);
+ // editar/excluir despesa manual
+ const est=d.expenses.find(e=>e.description==='Estacionamento')!;d=applyAction(d,'update_expense',{id:est.id,category:'Outros',description:'Estacionamento compra 03/10',amount:45,date:'2026-10-03'});
+ assert.equal(cashFlow(d).balance,-145);d=applyAction(d,'cancel_expense',{id:est.id});assert.equal(cashFlow(d).balance,-100);
+});

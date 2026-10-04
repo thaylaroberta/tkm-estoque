@@ -4,14 +4,16 @@ export type Batch = {id:string;number:number;name:string;freight:number;other_co
 export type BatchItem = {id:string;batch_id:string;variant_id:string;quantity:number;unit_cost:number;freight:number;other_costs?:number;effective_unit_cost?:number|null;avg_cost_after?:number|null;suggested_price?:number|null;sale_price?:number|null};
 export type Sale = {id:string;number:number;payment:string;revenue:number;cogs:number;card_fee:number;discount?:number;delivery_charged:number;delivery_cost:number;note:string;updated_at?:string|null;created_at:string;request_id:string};
 export type SaleItem = {id:string;sale_id:string;variant_id:string;quantity:number;unit_price:number;list_price?:number|null;discount?:number;cogs:number};
-export type Expense = {id:string;category:string;description:string;amount:number;date:string;source:string;sale_id?:string;request_id:string};
+export type Expense = {id:string;category:string;description:string;amount:number;date:string;source:string;sale_id?:string;external_id?:string|null;canceled_at?:string|null;updated_at?:string|null;request_id:string};
+export type CashKind='saldo_inicial'|'aporte'|'retirada'|'emprestimo'|'pagamento_emprestimo';
+export type CashEntry = {id:string;kind:CashKind;amount:number;date:string;description:string;loan_id?:string|null;interest:number;canceled_at?:string|null;request_id:string;created_at:string};
 export type Movement = {id:string;variant_id:string;kind:'Entrada'|'Venda'|'Ajuste';quantity:number;value:number;reference_id:string;reason:string;adjustment_type?:'perda'|'correcao'|null;created_at:string};
 export type Settings = {list_header:string;list_footer:string};
-export type Data = {settings?:Settings|null;batch_revisions?:string[];products:Product[];variants:Variant[];batches:Batch[];batch_items:BatchItem[];sales:Sale[];sale_items:SaleItem[];expenses:Expense[];movements:Movement[]};
+export type Data = {cash?:CashEntry[];settings?:Settings|null;batch_revisions?:string[];products:Product[];variants:Variant[];batches:Batch[];batch_items:BatchItem[];sales:Sale[];sale_items:SaleItem[];expenses:Expense[];movements:Movement[]};
 export type Line = {variant_id?:string;quantity:number;unit_cost?:number;unit_price?:number;product_id?:string;product_key?:string;variant_name?:string};
 export type NewProduct = {key:string;brand:string;model:string;category?:string;price:number;minimum?:number};
-export type Payload = {id?:string;request_id?:string;brand?:string;model?:string;category?:string;price?:number;minimum?:number;variants?:string[];items?:Line[];name?:string;freight?:number;payment?:string;card_fee?:number;delivery_charged?:number;delivery_cost?:number;note?:string;description?:string;amount?:number;date?:string;variant_id?:string;quantity?:number;reason?:string;unit_cost?:number;adjustment_type?:'perda'|'correcao';purchase_date?:string;other_costs?:number;new_products?:NewProduct[];price_updates?:{product_id:string;price:number}[];batch_id?:string;sale_id?:string;discount?:number;header?:string;footer?:string;list_products?:{id:string;list_name?:string;list_emoji?:string;list_price?:number|null}[];list_variants?:{id:string;list_emoji?:string;list_label?:string;list_description?:string}[]};
-export type Action = 'save_product'|'record_batch'|'record_purchase'|'update_purchase'|'rename_purchase'|'delete_purchase'|'update_sale'|'delete_sale'|'save_list_settings'|'record_sale'|'record_expense'|'adjust_stock';
+export type Payload = {id?:string;request_id?:string;brand?:string;model?:string;category?:string;price?:number;minimum?:number;variants?:string[];items?:Line[];name?:string;freight?:number;payment?:string;card_fee?:number;delivery_charged?:number;delivery_cost?:number;note?:string;description?:string;amount?:number;date?:string;variant_id?:string;quantity?:number;reason?:string;unit_cost?:number;adjustment_type?:'perda'|'correcao';purchase_date?:string;other_costs?:number;new_products?:NewProduct[];price_updates?:{product_id:string;price:number}[];batch_id?:string;sale_id?:string;discount?:number;header?:string;footer?:string;kind?:CashKind;loan_id?:string;interest?:number;list_products?:{id:string;list_name?:string;list_emoji?:string;list_price?:number|null}[];list_variants?:{id:string;list_emoji?:string;list_label?:string;list_description?:string}[]};
+export type Action = 'save_product'|'record_batch'|'record_purchase'|'update_purchase'|'rename_purchase'|'delete_purchase'|'update_sale'|'delete_sale'|'save_list_settings'|'record_cash_entry'|'cancel_cash_entry'|'update_expense'|'cancel_expense'|'record_sale'|'record_expense'|'adjust_stock';
 export const emptyData = ():Data => ({products:[],variants:[],batches:[],batch_items:[],sales:[],sale_items:[],expenses:[],movements:[]});
 export const brl = (value:number) => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(value);
 export const num = (value:number) => new Intl.NumberFormat('pt-BR',{maximumFractionDigits:2}).format(value);
@@ -106,6 +108,30 @@ export function whatsappList(d:Data,opts:{onlyInStock?:boolean;showQuantity?:boo
  }).filter(Boolean);
  const header=(opts.header??d.settings?.list_header??'').trim(),footer=(opts.footer??d.settings?.list_footer??'').trim();
  return [header,...blocks,footer].filter(Boolean).join(`\n\n${LIST_SEPARATOR}\n\n`).trim();
+}
+/** Saldo em aberto de um empréstimo: principal recebido − principal pago (juros não abatem a dívida). */
+export const loanOpen=(d:Data,loanId:string)=>{const loan=(d.cash??[]).find(c=>c.id===loanId);if(!loan)return 0;return round(loan.amount-(d.cash??[]).filter(c=>c.loan_id===loanId).reduce((a,c)=>a+c.amount-c.interest,0));};
+export type CashRow={key:string;date:string;kind:'venda'|'compra'|'despesa'|CashKind;label:string;detail:string;amount:number;balance:number;ref?:string};
+/** Caixa: dinheiro que entrou e saiu, a partir do saldo inicial (ou do primeiro lançamento). */
+export function cashFlow(d:Data,from='',to=''){
+ const cash=(d.cash??[]).filter(c=>!c.canceled_at);const opening=[...cash].filter(c=>c.kind==='saldo_inicial').sort((a,b)=>a.date.localeCompare(b.date)||a.created_at.localeCompare(b.created_at)).at(-1);
+ const start=opening?.date??'';const inRange=(date:string)=>!start||date>=start;
+ const rows:Omit<CashRow,'balance'>[]=[];
+ if(opening)rows.push({key:opening.id,date:opening.date,kind:'saldo_inicial',label:'Saldo inicial',detail:opening.description||'Dinheiro em caixa no início',amount:opening.amount,ref:opening.id});
+ for(const s of d.sales){const date=day(s.created_at);if(inRange(date))rows.push({key:s.id,date,kind:'venda',label:`Venda #${String(s.number).padStart(3,'0')}`,detail:`${s.payment}${(s.delivery_charged??0)>0?' · inclui entrega cobrada':''}`,amount:s.revenue+(s.delivery_charged??0)});}
+ for(const b of d.batches){const date=b.purchase_date??day(b.created_at);if(inRange(date))rows.push({key:b.id,date,kind:'compra',label:`Compra · Lote ${b.number}`,detail:b.name,amount:-(b.merchandise+b.freight+(b.other_costs??0))});}
+ for(const e of d.expenses){if(e.canceled_at||!inRange(e.date))continue;rows.push({key:e.id,date:e.date,kind:'despesa',label:`Despesa · ${e.category}`,detail:e.description,amount:-e.amount});}
+ const names:Record<CashKind,string>={saldo_inicial:'Saldo inicial',aporte:'Aporte (dinheiro seu)',retirada:'Retirada',emprestimo:'Empréstimo recebido',pagamento_emprestimo:'Pagamento de empréstimo'};
+ for(const c of cash){if(c.kind==='saldo_inicial'||!inRange(c.date))continue;const out=c.kind==='retirada'||c.kind==='pagamento_emprestimo';
+  rows.push({key:c.id,date:c.date,kind:c.kind,label:names[c.kind],detail:c.kind==='pagamento_emprestimo'?`${cash.find(l=>l.id===c.loan_id)?.description||'Empréstimo'}${c.interest>0?` · inclui ${brl(c.interest)} de juros (lançados em Despesas)`:''}`:c.description,amount:out?-c.amount:c.amount,ref:c.id});}
+ // juros já saem pelo pagamento: não contar de novo a despesa de juros no caixa
+ const order:Record<string,number>={saldo_inicial:0,emprestimo:1,aporte:2,venda:3,compra:4,despesa:5,pagamento_emprestimo:6,retirada:7};
+ const clean=rows.filter(r=>!(r.kind==='despesa'&&d.expenses.find(e=>e.id===r.key)?.source==='caixa'));
+ clean.sort((a,b)=>a.date.localeCompare(b.date)||order[a.kind]-order[b.kind]);
+ let running=0;const all:CashRow[]=clean.map(r=>({...r,balance:(running=round(running+r.amount))}));
+ const within=(date:string)=>(!from||date>=from)&&(!to||date<=to);const period=all.filter(r=>within(r.date)&&r.kind!=='saldo_inicial');
+ const loans=cash.filter(c=>c.kind==='emprestimo').map(l=>({...l,paid:round(l.amount-loanOpen(d,l.id)),open:loanOpen(d,l.id),interestPaid:round(cash.filter(c=>c.loan_id===l.id).reduce((a,c)=>a+c.interest,0))}));
+ return {start,opening:opening?.amount??0,balance:running,rows:all,period,inflow:period.filter(r=>r.amount>0).reduce((a,r)=>a+r.amount,0),outflow:-period.filter(r=>r.amount<0).reduce((a,r)=>a+r.amount,0),loans,debt:loans.reduce((a,l)=>a+l.open,0)};
 }
 export const round = (n:number, digits=2) => Math.round((n+Number.EPSILON)*10**digits)/10**digits;
 const id = () => crypto.randomUUID();
@@ -211,6 +237,23 @@ export function applyAction(original:Data,action:Action,p:Payload,now=new Date()
   d.settings={list_header:p.header??'',list_footer:p.footer??''};
   for(const x of p.list_products??[]){const product=d.products.find(y=>y.id===x.id);if(!product)continue;if((x.list_price??0)<0)throw Error('Preço da lista inválido.');product.list_name=x.list_name?.trim()||null;product.list_emoji=x.list_emoji?.trim()||null;product.list_price=x.list_price==null?null:round(x.list_price);}
   for(const x of p.list_variants??[]){const v=d.variants.find(y=>y.id===x.id);if(!v)continue;v.list_emoji=x.list_emoji?.trim()||null;v.list_label=x.list_label?.trim()||null;v.list_description=x.list_description?.trim()||null;}
+ } else if(action==='record_cash_entry') {
+  d.cash=d.cash??[];if(d.cash.some(c=>c.request_id===rid))return d;
+  const kind=p.kind;if(!kind||!['saldo_inicial','aporte','retirada','emprestimo','pagamento_emprestimo'].includes(kind))throw Error('Tipo de lançamento inválido.');
+  const amount=round(positive(p.amount));const date=p.date||day(now);if(date>day(now))throw Error('A data não pode ser futura.');
+  let interest=0,loan_id:string|null=null;
+  if(kind==='pagamento_emprestimo'){const loan=d.cash.find(c=>c.id===p.loan_id&&c.kind==='emprestimo');if(!loan)throw Error('Escolha o empréstimo que está sendo pago.');interest=round(p.interest??0);if(interest<0||interest>=amount)throw Error('Os juros devem ser menores que o valor pago.');
+   if(amount-interest>loanOpen(d,loan.id)+0.004)throw Error(`O valor pago (sem juros) é maior que o saldo em aberto do empréstimo (${brl(loanOpen(d,loan.id))}).`);loan_id=loan.id;}
+  const entry:CashEntry={id:id(),kind,amount,date,description:p.description?.trim()??'',loan_id,interest,request_id:rid,created_at:now};d.cash.push(entry);
+  if(interest>0){const loan=d.cash.find(c=>c.id===loan_id);d.expenses.push({id:id(),category:'Outros',description:`Juros do empréstimo${loan?.description?` — ${loan.description}`:''}`,amount:interest,date,source:'caixa',external_id:entry.id,request_id:id()});}
+ } else if(action==='cancel_cash_entry') {
+  const e=(d.cash??[]).find(c=>c.id===p.id);if(!e)throw Error('Lançamento não encontrado.');
+  if(e.kind==='emprestimo'&&(d.cash??[]).some(c=>c.loan_id===e.id))throw Error('Este empréstimo tem pagamentos registrados. Exclua os pagamentos antes.');
+  d.cash=(d.cash??[]).filter(c=>c.id!==e.id);d.expenses=d.expenses.filter(x=>!(x.source==='caixa'&&x.external_id===e.id));
+ } else if(action==='update_expense'||action==='cancel_expense') {
+  const x=d.expenses.find(e=>e.id===p.id);if(!x)throw Error('Despesa não encontrada.');if(x.source!=='manual')throw Error('Esta despesa é gerada automaticamente (venda ou empréstimo). Corrija na origem.');
+  if(action==='cancel_expense'){d.expenses=d.expenses.filter(e=>e.id!==x.id);return d;}
+  if(!p.description?.trim()||!p.date)throw Error('Preencha os dados da despesa.');Object.assign(x,{category:p.category??x.category,description:p.description.trim(),amount:round(positive(p.amount)),date:p.date,updated_at:now});
  } else if(action==='record_expense') {
   if(!['Anúncios','Entrega','Embalagem','Ferramentas/sistemas','Outros'].includes(p.category??'')||!p.description?.trim()||!p.date)throw Error('Preencha os dados da despesa.');
   d.expenses.push({id:id(),category:p.category!,description:p.description.trim(),amount:round(positive(p.amount)),date:p.date,source:'manual',request_id:rid});
