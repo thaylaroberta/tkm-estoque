@@ -576,3 +576,15 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
   .sale-card-bottom > strong { font-size: 17px; color: var(--tkm-purple); }
   .sale-card-edit { display: block; margin-top: 8px; font-size: 12px; font-weight: 600; color: var(--tkm-purple); }
 }
+.period-cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.period-card { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; min-width: 0; transition: border-color .15s, box-shadow .15s; }
+.period-card > span { font-size: 12px; font-weight: 600; color: #5d4f6b; }
+.period-card > strong { font-size: 20px; letter-spacing: -.5px; }
+.period-card > small { font-size: 11px; color: var(--muted); }
+.period-card > em { font-style: normal; font-size: 12px; font-weight: 600; color: var(--green); margin-top: 4px; }
+.period-card > em.negative { color: #c2364b; }
+.period-card:hover, .period-card:focus-visible { border-color: var(--tkm-purple); }
+.period-card.active { border-color: var(--tkm-purple); box-shadow: 0 0 0 3px #eee4fc; background: #fcf9ff; }
+.period-card.active > span { color: var(--tkm-purple); }
+@media (max-width: 1100px) { .period-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .period-cards { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; margin: 0 -16px; padding: 2px 16px 6px; gap: 10px; } .period-card { flex: 0 0 62%; scroll-snap-align: start; } }
