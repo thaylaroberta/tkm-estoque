@@ -111,16 +111,16 @@ export function whatsappList(d:Data,opts:{onlyInStock?:boolean;showQuantity?:boo
 }
 /** Saldo em aberto de um empréstimo: principal recebido − principal pago (juros não abatem a dívida). */
 export const loanOpen=(d:Data,loanId:string)=>{const loan=(d.cash??[]).find(c=>c.id===loanId);if(!loan)return 0;return round(loan.amount-(d.cash??[]).filter(c=>c.loan_id===loanId).reduce((a,c)=>a+c.amount-c.interest,0));};
-export type CashRow={key:string;date:string;kind:'venda'|'compra'|'despesa'|CashKind;label:string;detail:string;amount:number;balance:number;ref?:string};
+export type CashRow={key:string;date:string;kind:'venda'|'compra'|'despesa'|CashKind;label:string;detail:string;amount:number;balance:number|null;ref?:string;expense?:Expense};
 /** Caixa: dinheiro que entrou e saiu, a partir do saldo inicial (ou do primeiro lançamento). */
 export function cashFlow(d:Data,from='',to=''){
  const cash=(d.cash??[]).filter(c=>!c.canceled_at);const opening=[...cash].filter(c=>c.kind==='saldo_inicial').sort((a,b)=>a.date.localeCompare(b.date)||a.created_at.localeCompare(b.created_at)).at(-1);
- const start=opening?.date??'';const inRange=(date:string)=>!start||date>=start;
+ const start=opening?.date??'';const inRange=(_date:string)=>true;const counts=(date:string)=>!start||date>=start;
  const rows:Omit<CashRow,'balance'>[]=[];
  if(opening)rows.push({key:opening.id,date:opening.date,kind:'saldo_inicial',label:'Saldo inicial',detail:opening.description||'Dinheiro em caixa no início',amount:opening.amount,ref:opening.id});
  for(const s of d.sales){const date=day(s.created_at);if(inRange(date))rows.push({key:s.id,date,kind:'venda',label:`Venda #${String(s.number).padStart(3,'0')}`,detail:`${s.payment}${(s.delivery_charged??0)>0?' · inclui entrega cobrada':''}`,amount:s.revenue+(s.delivery_charged??0)});}
  for(const b of d.batches){const date=b.purchase_date??day(b.created_at);if(inRange(date))rows.push({key:b.id,date,kind:'compra',label:`Compra · Lote ${b.number}`,detail:b.name,amount:-(b.merchandise+b.freight+(b.other_costs??0))});}
- for(const e of d.expenses){if(e.canceled_at||!inRange(e.date))continue;rows.push({key:e.id,date:e.date,kind:'despesa',label:`Despesa · ${e.category}`,detail:e.description,amount:-e.amount});}
+ for(const e of d.expenses){if(e.canceled_at||!inRange(e.date))continue;rows.push({key:e.id,date:e.date,kind:'despesa',label:`Despesa · ${e.category}`,detail:e.description,amount:-e.amount,expense:e});}
  const names:Record<CashKind,string>={saldo_inicial:'Saldo inicial',aporte:'Aporte (dinheiro seu)',retirada:'Retirada',emprestimo:'Empréstimo recebido',pagamento_emprestimo:'Pagamento de empréstimo'};
  for(const c of cash){if(c.kind==='saldo_inicial'||!inRange(c.date))continue;const out=c.kind==='retirada'||c.kind==='pagamento_emprestimo';
   rows.push({key:c.id,date:c.date,kind:c.kind,label:names[c.kind],detail:c.kind==='pagamento_emprestimo'?`${cash.find(l=>l.id===c.loan_id)?.description||'Empréstimo'}${c.interest>0?` · inclui ${brl(c.interest)} de juros (lançados em Despesas)`:''}`:c.description,amount:out?-c.amount:c.amount,ref:c.id});}
@@ -128,8 +128,9 @@ export function cashFlow(d:Data,from='',to=''){
  const order:Record<string,number>={saldo_inicial:0,emprestimo:1,aporte:2,venda:3,compra:4,despesa:5,pagamento_emprestimo:6,retirada:7};
  const clean=rows.filter(r=>!(r.kind==='despesa'&&d.expenses.find(e=>e.id===r.key)?.source==='caixa'));
  clean.sort((a,b)=>a.date.localeCompare(b.date)||order[a.kind]-order[b.kind]);
- let running=0;const all:CashRow[]=clean.map(r=>({...r,balance:(running=round(running+r.amount))}));
- const within=(date:string)=>(!from||date>=from)&&(!to||date<=to);const period=all.filter(r=>within(r.date)&&r.kind!=='saldo_inicial');
+ // O saldo só é acumulado a partir do saldo inicial; antes dele, a linha aparece no extrato sem saldo.
+ let running=0;const all:CashRow[]=clean.map(r=>counts(r.date)?{...r,balance:(running=round(running+r.amount))}:{...r,balance:null});
+ const within=(date:string)=>(!from||date>=from)&&(!to||date<=to);const period=all.filter(r=>within(r.date)&&r.kind!=='saldo_inicial'&&r.balance!==null);
  const loans=cash.filter(c=>c.kind==='emprestimo').map(l=>({...l,paid:round(l.amount-loanOpen(d,l.id)),open:loanOpen(d,l.id),interestPaid:round(cash.filter(c=>c.loan_id===l.id).reduce((a,c)=>a+c.interest,0))}));
  return {start,opening:opening?.amount??0,balance:running,rows:all,period,inflow:period.filter(r=>r.amount>0).reduce((a,r)=>a+r.amount,0),outflow:-period.filter(r=>r.amount<0).reduce((a,r)=>a+r.amount,0),loans,debt:loans.reduce((a,l)=>a+l.open,0)};
 }

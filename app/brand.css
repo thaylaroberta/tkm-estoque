@@ -452,3 +452,15 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
 .metric-link .metric { height: 100%; transition: border-color .15s, box-shadow .15s; }
 .metric-link:hover .metric, .metric-link:focus-visible .metric { border-color: var(--tkm-purple); box-shadow: 0 0 0 3px #eee4fc; }
 .cash-strip { margin-bottom: 24px; }
+
+/* ── Financeiro (caixa + despesas) ────────────────────────────────────── */
+.kind-groups { display: grid; gap: 12px; margin-bottom: 12px; }
+.kind-group > span { display: block; font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
+.kind-group > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.kind-option { flex-direction: row; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px; margin: 0; cursor: pointer; font-size: 12px; font-weight: 600; background: #fff; }
+.kind-option input { width: auto; accent-color: var(--tkm-purple); }
+.kind-option.active { border-color: var(--tkm-purple); background: #faf6ff; color: var(--tkm-purple); }
+.kind-option.disabled { opacity: .45; cursor: not-allowed; }
+.fin-filter { flex-wrap: wrap; }
+.fin-total { font-size: 12px; color: var(--muted); padding: 0 22px 10px; margin: 0; }
+@media (max-width: 600px) { .fin-filter { margin-top: 10px; } .fin-total { padding: 0 16px 10px; } }
