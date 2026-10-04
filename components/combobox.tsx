@@ -34,7 +34,7 @@ export function Combobox({label,options,value,onChange,placeholder='Digite para 
   <span className="combobox-field"><Search size={15} aria-hidden/>
    <input ref={input} role="combobox" aria-expanded={open} aria-controls={id} aria-autocomplete="list" autoComplete="off" autoFocus={autoFocus}
     aria-activedescendant={open&&total?`${id}-${active}`:undefined} placeholder={placeholder} value={text} required={required}
-    onFocus={e=>{setOpen(true);e.currentTarget.select();}} onChange={e=>{setText(e.target.value);setOpen(true);}} onKeyDown={key}
+    onFocus={e=>{setOpen(true);e.currentTarget.select();const el=e.currentTarget;if(window.matchMedia('(max-width: 600px)').matches)setTimeout(()=>el.scrollIntoView({block:'start',behavior:'smooth'}),300);}} onChange={e=>{setText(e.target.value);setOpen(true);}} onKeyDown={key}
     onBlur={()=>{setOpen(false);setText(selected?.label??'');}}/>
    {name&&<input type="hidden" name={name} value={value}/>}
   </span>
