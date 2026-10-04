@@ -132,7 +132,17 @@ export function cashFlow(d:Data,from='',to=''){
  let running=0;const all:CashRow[]=clean.map(r=>counts(r.date)?{...r,balance:(running=round(running+r.amount))}:{...r,balance:null});
  const within=(date:string)=>(!from||date>=from)&&(!to||date<=to);const period=all.filter(r=>within(r.date)&&r.kind!=='saldo_inicial'&&r.balance!==null);
  const loans=cash.filter(c=>c.kind==='emprestimo').map(l=>({...l,paid:round(l.amount-loanOpen(d,l.id)),open:loanOpen(d,l.id),interestPaid:round(cash.filter(c=>c.loan_id===l.id).reduce((a,c)=>a+c.interest,0))}));
- return {start,opening:opening?.amount??0,balance:running,rows:all,period,inflow:period.filter(r=>r.amount>0).reduce((a,r)=>a+r.amount,0),outflow:-period.filter(r=>r.amount<0).reduce((a,r)=>a+r.amount,0),loans,debt:loans.reduce((a,l)=>a+l.open,0)};
+ // Geração de caixa da operação no período: vendas recebidas − compras pagas − despesas pagas (sem empréstimos, aportes e retiradas).
+ const op=(k:string)=>round(all.filter(r=>within(r.date)&&r.kind===k).reduce((a,r)=>a+r.amount,0));
+ const operating={sales:op('venda'),purchases:-op('compra'),expenses:-op('despesa'),total:round(op('venda')+op('compra')+op('despesa'))};
+ return {start,opening:opening?.amount??0,balance:running,rows:all,period,operating,inflow:period.filter(r=>r.amount>0).reduce((a,r)=>a+r.amount,0),outflow:Math.abs(period.filter(r=>r.amount<0).reduce((a,r)=>a+r.amount,0)),loans,debt:loans.reduce((a,l)=>a+l.open,0)};
+}
+/** Lucro × caixa (todo o histórico): do lucro acumulado não retirado, quanto está em dinheiro e quanto foi reinvestido (estoque, dívidas pagas). */
+export function profitSplit(d:Data){
+ const net=round(report(d,'','').net);const balance=cashFlow(d).balance;
+ const withdrawn=round((d.cash??[]).filter(x=>!x.canceled_at&&x.kind==='retirada').reduce((a,x)=>a+x.amount,0));
+ const kept=round(net-withdrawn);const available=round(Math.max(0,Math.min(kept,balance)));
+ return {net,withdrawn,kept,available,reinvested:round(Math.max(0,kept-available)),balance};
 }
 export const round = (n:number, digits=2) => Math.round((n+Number.EPSILON)*10**digits)/10**digits;
 const id = () => crypto.randomUUID();
