@@ -448,3 +448,7 @@ input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner
 .cash-hint { margin: -6px 0 14px; }
 .cash-note { margin: -8px 0 18px; }
 .row-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; white-space: nowrap; }
+.metric-link { all: unset; display: block; cursor: pointer; border-radius: var(--radius); }
+.metric-link .metric { height: 100%; transition: border-color .15s, box-shadow .15s; }
+.metric-link:hover .metric, .metric-link:focus-visible .metric { border-color: var(--tkm-purple); box-shadow: 0 0 0 3px #eee4fc; }
+.cash-strip { margin-bottom: 24px; }
